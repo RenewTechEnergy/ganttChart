@@ -4,7 +4,7 @@ Interactive project tracker with Project / Task / Subtask hierarchy, CPM schedul
 
 ## Live app
 
-Hosted on GitHub Pages → `https://<your-org>.github.io/<repo-name>/`
+Hosted on GitHub Pages → `https://renewtechenergy.github.io/ganttChart/`
 
 ## How to use
 
@@ -40,5 +40,5 @@ references/
 1. Push this repo to GitHub
 2. Go to **Settings → Pages**
 3. Set source to `main` branch, `/ (root)` folder
-4. Your board will be live at `https://<org>.github.io/<repo>/`
+4. Your board will be live at `https://renewtechenergy.github.io/ganttChart/`
 # ganttChart
