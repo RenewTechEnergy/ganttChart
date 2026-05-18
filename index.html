@@ -1,0 +1,3178 @@
+<!DOCTYPE html>
+<script type="application/json" id="cowork-artifact-meta">
+{
+  "name": "Project Gantt",
+  "schemaVersion": 1,
+  "description": "Interactive Gantt with Project / Task / Subtask hierarchy. All 15 fields editable. Saves to a fresh Excel with the hierarchy preserved, all data columns, and a colored calendar visualization.",
+  "mcpTools": [],
+  "mcpServerNames": []
+}
+</script>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Project Gantt</title>
+  <style>
+    :root { color-scheme: light; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f8f9fa; color: #1a1a2e; padding: 20px 16px 32px; user-select: none; }
+
+    h1 { font-size: 17px; font-weight: 700; color: #111827; margin-bottom: 2px; }
+    .sub { font-size: 11px; color: #9ca3af; margin-bottom: 14px; }
+
+    .stats { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+    .stat-card { background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 14px; min-width: 80px; }
+    .stat-number { font-size: 20px; font-weight: 800; color: #111827; }
+    .stat-label  { font-size: 10px; color: #6b7280; margin-top: 1px; }
+
+    .toolbar { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
+    .filter-label { font-size: 12px; font-weight: 600; color: #374151; }
+    select, input[type="text"], input[type="date"], input[type="number"] {
+      font-size: 12px; padding: 4px 8px;
+      border: 1px solid #d1d5db; border-radius: 6px;
+      background: white; color: #374151;
+    }
+    select { cursor: pointer; }
+    .spacer { flex: 1; min-width: 8px; }
+    .btn { font-size: 11px; font-weight: 600; padding: 5px 11px; border-radius: 6px; border: none; cursor: pointer; transition: background .15s; white-space: nowrap; }
+    .btn-add-p { background: #1a6b2e; color: white; }
+    .btn-add-p:hover { background: #155725; }
+    .btn-add-t { background: #2563eb; color: white; }
+    .btn-add-t:hover { background: #1d4ed8; }
+    .btn-add-s { background: #7c3aed; color: white; }
+    .btn-add-s:hover { background: #6d28d9; }
+    .btn-reset { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; }
+    .btn-reset:hover { background: #e5e7eb; }
+    .btn-png { background: #6366f1; color: white; }
+    .btn-png:hover { background: #4f46e5; }
+    .btn-pdf { background: #0ea5e9; color: white; }
+    .btn-pdf:hover { background: #0284c7; }
+    .btn-xlsx { background: #16a34a; color: white; }
+    .btn-xlsx:hover { background: #15803d; }
+    .btn-ok { background: #1a6b2e; color: white; }
+    .btn-ok:hover { background: #155725; }
+    .btn-cancel { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; }
+    .btn-del { background: #fee2e2; color: #b91c1c; }
+    .btn-del:hover { background: #fecaca; }
+    .btn-collapse { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; }
+
+    /* Legend */
+    .legend { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; align-items: center; }
+    .legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #374151; }
+    .legend-swatch { width: 11px; height: 11px; border-radius: 2px; }
+
+    /* Drop overlay */
+    .drop-wrap { position: relative; }
+    .drop-overlay { position: absolute; inset: 0; z-index: 50; background: rgba(26,107,46,.08); border: 3px dashed #1a6b2e; border-radius: 12px; display: none; align-items: center; justify-content: center; pointer-events: none; }
+    .drop-overlay.active { display: flex; }
+    .drop-msg { font-size: 16px; font-weight: 700; color: #1a6b2e; }
+
+    /* Gantt */
+    .gantt-wrap { background: white; border: 1px solid #e5e7eb; border-radius: 12px; overflow: visible; }
+    .gantt-header { display: flex; border-bottom: 2px solid #e5e7eb; background: #f9fafb; border-radius: 12px 12px 0 0; overflow: hidden; }
+    .lbl-col { width: 280px; min-width: 280px; padding: 10px 12px; font-size: 10px; font-weight: 700; color: #6b7280; letter-spacing: .5px; text-transform: uppercase; border-right: 1px solid #e5e7eb; flex-shrink: 0; }
+    .tl-header { flex: 1; position: relative; height: 32px; overflow: visible; }
+    .month-label { position: absolute; top: 9px; font-size: 10px; font-weight: 600; color: #9ca3af; transform: translateX(-50%); white-space: nowrap; pointer-events: none; }
+    .gantt-row { display: flex; align-items: stretch; border-bottom: 1px solid #f3f4f6; min-height: 60px; transition: background .1s; }
+    .gantt-row:last-child { border-bottom: none; }
+    .gantt-row:hover { background: #fafafa; }
+
+    /* Row label — hierarchy column */
+    .row-label { width: 280px; min-width: 280px; padding: 8px 12px; border-right: 1px solid #e5e7eb; display: flex; align-items: center; gap: 8px; flex-shrink: 0; cursor: pointer; }
+    .row-label:hover .row-name { color: #1a6b2e; }
+    .collapse-btn { width: 16px; height: 16px; font-size: 9px; line-height: 14px; text-align: center; background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 3px; cursor: pointer; color: #6b7280; user-select: none; flex-shrink: 0; }
+    .collapse-btn.empty { visibility: hidden; }
+    .row-id-badge { font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; flex-shrink: 0; white-space: nowrap; }
+    .row-id-badge.p { background: #dcfce7; color: #166534; }
+    .row-id-badge.t { background: #dbeafe; color: #1e40af; }
+    .row-id-badge.s { background: #ede9fe; color: #6d28d9; }
+    .row-text { flex: 1; min-width: 0; }
+    .row-name { font-size: 12px; color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .row-name.is-p { font-weight: 700; }
+    .row-name.is-t { font-weight: 600; }
+    .row-name.is-s { font-weight: 500; color: #4b5563; }
+    .row-meta { font-size: 10px; color: #9ca3af; margin-top: 1px; display: flex; gap: 8px; }
+
+    .row-timeline { flex: 1; position: relative; overflow: hidden; }
+    .m-div { position: absolute; top: 0; bottom: 0; width: 1px; background: #f3f4f6; pointer-events: none; }
+    .today-line { position: absolute; top: 0; bottom: 0; width: 2px; background: #ef4444; z-index: 5; pointer-events: none; }
+    .today-tag { position: absolute; top: 4px; left: 4px; font-size: 9px; font-weight: 700; color: #ef4444; white-space: nowrap; pointer-events: none; }
+
+    /* Bars — sched bar with progress overlay */
+    .g-bar { position: absolute; height: 22px; top: 50%; transform: translateY(-50%); border-radius: 4px; display: flex; align-items: center; font-size: 10px; font-weight: 600; color: white; overflow: hidden; cursor: grab; transition: box-shadow .15s, left .25s cubic-bezier(0.34, 1.5, 0.64, 1), width .25s cubic-bezier(0.34, 1.5, 0.64, 1); z-index: 3; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+    .g-bar.is-p { height: 26px; }
+    .g-bar.is-s { height: 18px; opacity: .85; }
+    .g-bar.is-dragging { cursor: grabbing; box-shadow: 0 4px 16px rgba(0,0,0,.3); z-index: 20; opacity: .92; transition: none; }
+    .g-bar:hover { box-shadow: 0 2px 8px rgba(0,0,0,.22); }
+    .g-bar .progress-fill { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(0,0,0,.18); }
+    .bar-label { padding: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; pointer-events: none; position: relative; z-index: 1; }
+    .rh { position: absolute; top: 0; bottom: 0; width: 8px; background: rgba(255,255,255,.25); cursor: ew-resize; z-index: 5; }
+    .rh:hover { background: rgba(255,255,255,.5); }
+    .rh.rh-left { left: 0; border-radius: 4px 0 0 4px; }
+    .rh.rh-right { right: 0; border-radius: 0 4px 4px 0; }
+
+    /* Tooltip */
+    .drag-tip { position: fixed; background: #111827; color: white; font-size: 11px; font-weight: 600; padding: 4px 9px; border-radius: 5px; pointer-events: none; z-index: 9999; display: none; white-space: nowrap; }
+    .tip { position: fixed; background: #1f2937; color: white; padding: 9px 12px; border-radius: 8px; font-size: 11px; pointer-events: none; z-index: 9998; max-width: 320px; display: none; line-height: 1.6; box-shadow: 0 4px 12px rgba(0,0,0,.25); }
+    .tip-title { font-weight: 700; margin-bottom: 4px; font-size: 12px; }
+    .tip-row { display: flex; gap: 6px; }
+    .tip-row b { min-width: 84px; color: #d1d5db; font-weight: 600; }
+
+    /* Modal */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 10000; }
+    .modal { background: white; border-radius: 12px; padding: 22px; width: 540px; max-width: 95vw; max-height: 92vh; overflow-y: auto; box-shadow: 0 12px 40px rgba(0,0,0,.25); }
+    .modal h3 { font-size: 15px; font-weight: 700; margin-bottom: 14px; color: #111827; }
+    .modal label { display: flex; flex-direction: column; gap: 3px; margin-bottom: 9px; font-size: 11px; font-weight: 600; color: #374151; }
+    .modal input, .modal select { font-size: 13px; padding: 6px 9px; width: 100%; }
+    .modal input:focus, .modal select:focus { outline: 2px solid #1a6b2e; border-color: transparent; }
+    .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .modal-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+    .modal-section { margin-top: 12px; padding-top: 10px; border-top: 1px dashed #e5e7eb; }
+    .modal-section-label { font-size: 10px; font-weight: 700; color: #9ca3af; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
+    .modal-readonly input { background: #f9fafb; color: #6b7280; }
+    .modal-actions { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; }
+    .modal-actions .btn-del { margin-right: auto; }
+
+    .dirty-badge { display: inline-block; background: #fef3c7; color: #92400e; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 9px; border: 1px solid #fde68a; margin-left: 8px; vertical-align: middle; }
+    .source-label { font-size: 11px; color: #9ca3af; }
+
+    .ctx-item:hover { background: #f3f4f6; }
+    .gantt-row.is-selected { outline: 2px solid #0e7490; outline-offset: -2px; background: rgba(14, 116, 144, 0.04) !important; }
+    .gantt-row.drop-valid   { background: rgba(34, 197, 94, 0.14) !important; outline: 2px solid #22c55e; outline-offset: -2px; }
+    .gantt-row.drop-invalid { background: rgba(239, 68, 68, 0.14) !important; outline: 2px solid #ef4444; outline-offset: -2px; cursor: not-allowed; }
+    .row-label[draggable="true"]        { cursor: grab; }
+    .row-label[draggable="true"]:active { cursor: grabbing; }
+    .filter-popup-item { display: flex; align-items: center; gap: 8px; padding: 5px 4px; font-size: 12px; color: #374151; cursor: pointer; border-radius: 4px; }
+    .filter-popup-item:hover { background: #f3f4f6; }
+    .filter-popup-item input { width: auto; }
+    .gantt-row.is-today-current { background: #FFF7CC !important; }
+    .gantt-row.is-today-current .row-name::after { content: ' 🔥'; }
+
+    @media print {
+      .toolbar, .legend, .modal-overlay, .tip, .drag-tip, .dirty-badge, .rh, .drop-overlay, #filterPopup, #ctxMenu { display: none !important; }
+      .gantt-wrap { border: 1px solid #ccc; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- RenewTech header logo -->
+  <div style="margin-bottom:14px;" id="logoHeader">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 90" width="200" height="56" aria-label="RenewTech Energy">
+      <circle cx="43" cy="38" r="28" fill="none" stroke="#1a6b2e" stroke-width="2.5"/>
+      <ellipse cx="43" cy="38" rx="28" ry="10" fill="none" stroke="#1a6b2e" stroke-width="1.6"/>
+      <ellipse cx="43" cy="38" rx="28" ry="19" fill="none" stroke="#1a6b2e" stroke-width="1.2"/>
+      <line x1="43" y1="10" x2="43" y2="66" stroke="#1a6b2e" stroke-width="1.6"/>
+      <ellipse cx="43" cy="38" rx="10" ry="28" fill="none" stroke="#1a6b2e" stroke-width="1.2"/>
+      <ellipse cx="43" cy="38" rx="19" ry="28" fill="none" stroke="#1a6b2e" stroke-width="1"/>
+      <path d="M52,14 C72,14 80,30 72,52 C64,62 50,66 38,60 C50,55 65,44 68,30 C60,36 48,46 38,54 C36,44 40,24 52,14Z" fill="#6dc03c"/>
+      <path d="M16,58 C10,48 10,28 22,18" fill="none" stroke="#1a6b2e" stroke-width="5" stroke-linecap="round"/>
+      <text x="82" y="34" font-family="'Segoe UI',Arial,sans-serif" font-size="28" font-weight="800" fill="#1a6b2e">Renew</text>
+      <text x="192" y="34" font-family="'Segoe UI',Arial,sans-serif" font-size="28" font-weight="800" fill="#6dc03c">Tech</text>
+      <line x1="82" y1="56" x2="100" y2="56" stroke="#6dc03c" stroke-width="2.5"/>
+      <text x="106" y="62" font-family="'Segoe UI',Arial,sans-serif" font-size="15" font-weight="700" letter-spacing="3" fill="#1a6b2e">ENERGY</text>
+      <line x1="222" y1="56" x2="242" y2="56" stroke="#6dc03c" stroke-width="2.5"/>
+    </svg>
+  </div>
+
+  <h1 id="pageTitle">📋 <span id="titleText" title="Click to rename" style="cursor:text; padding:2px 4px; border-radius:4px; transition:background .15s;" onclick="startEditTitle()" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='transparent'">Project Gantt</span>
+    <span class="dirty-badge" id="dirtyBadge" style="display:none">Unsaved edits</span>
+  </h1>
+  <p class="sub">Drag bars to edit dates · Click row to edit all fields · Drop a CSV / Excel anywhere to import</p>
+
+  <div id="stats" class="stats"></div>
+
+  <div class="toolbar">
+    <button class="btn btn-collapse" id="projFilterBtn" onclick="toggleFilterPopup('proj')" title="Filter projects">Projects ▾</button>
+    <button class="btn btn-collapse" id="ownerFilterBtn" onclick="toggleFilterPopup('owner')" title="Filter owners">Owners ▾</button>
+    <select id="fStatus" onchange="render()"><option value="">All Statuses</option></select>
+    <span class="filter-label" style="margin-left:6px;">Sort:</span>
+    <select id="fSort" onchange="render()">
+      <option value="tree">Hierarchy</option>
+      <option value="start-asc">Start ↑</option>
+      <option value="start-desc">Start ↓</option>
+      <option value="end-asc">End ↑</option>
+      <option value="end-desc">End ↓</option>
+      <option value="id">ID</option>
+    </select>
+    <button class="btn btn-collapse" onclick="toggleCollapseAll()" id="collapseAllBtn">⊟ Collapse</button>
+    <button class="btn" id="todayBtn" style="background:#dc2626;color:white" onclick="focusToday()" title="Toggle focus on tasks currently in progress">🎯 Today's tasks</button>
+    <label style="font-size:11px; color:#374151; display:flex; align-items:center; gap:4px; margin-left:6px;" title="Clamp displayed slack to at most this many days. Leave empty for no cap.">
+      Max slack (d):
+      <input type="number" id="maxSlackCap" min="0" placeholder="∞"
+             style="width:50px; padding:2px 4px; font-size:11px; border:1px solid #d1d5db; border-radius:4px;"
+             onchange="onMaxSlackChange()">
+    </label>
+    <div class="spacer"></div>
+    <button class="btn btn-pdf"  onclick="exportPDF()" title="Download as PDF">🖨 PDF</button>
+    <button class="btn btn-png"  onclick="exportPNG()" title="Download as PNG">🖼 PNG</button>
+    <button class="btn btn-xlsx" onclick="exportCSV()" title="Save as CSV — reload by running the skill on this file">💾 Save (CSV)</button>
+    <button class="btn btn-reset" onclick="resetAll()" title="Discard local edits">↺ Reset</button>
+    <button class="btn" style="background:#7c3aed;color:white;" onclick="recalcAll()" title="Force CPM rebuild — snap tasks behind their predecessors and recompute critical path/slack">🔄 Recalc</button>
+    <button class="btn btn-add-p" onclick="openAdd('project')">+ Project</button>
+    <button class="btn btn-add-t" onclick="openAdd('task')">+ Task</button>
+    <button class="btn btn-add-s" onclick="openAdd('subtask')">+ Subtask</button>
+    <button class="btn" style="background:#0e7490;color:white;" onclick="openTemplatePicker()" title="Seed a fully-dated project from a template (CPM-scheduled)">📋 From Template</button>
+  </div>
+  <!-- Filter popups -->
+  <div id="filterPopup" style="display:none; position:absolute; z-index:9000; background:white; border:1px solid #e5e7eb; border-radius:8px; box-shadow:0 4px 16px rgba(0,0,0,.1); padding:10px; max-height:300px; overflow-y:auto; min-width:220px;"></div>
+
+  <!-- Right-click context menu -->
+  <div id="ctxMenu" style="display:none; position:fixed; z-index:9500; background:white; border:1px solid #e5e7eb; border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,.15); padding:4px; min-width:140px;">
+    <div class="ctx-item" onclick="ctxEdit()" style="padding:6px 12px;font-size:12px;cursor:pointer;border-radius:4px;">✏️ Edit</div>
+    <div class="ctx-item" onclick="ctxCopy()" style="padding:6px 12px;font-size:12px;cursor:pointer;border-radius:4px;">📋 Copy <span style="color:#9ca3af; font-size:10px; margin-left:6px;">⌘C</span></div>
+    <div class="ctx-item" onclick="ctxPaste()" style="padding:6px 12px;font-size:12px;cursor:pointer;border-radius:4px;">📥 Paste <span style="color:#9ca3af; font-size:10px; margin-left:6px;">⌘V</span></div>
+    <div class="ctx-item" onclick="ctxDelete()" style="padding:6px 12px;font-size:12px;cursor:pointer;border-radius:4px;color:#b91c1c;">🗑 Delete</div>
+  </div>
+
+  <div class="legend" id="legend"></div>
+
+  <div class="drop-wrap" id="dropWrap">
+    <div class="drop-overlay" id="dropOverlay">
+      <div class="drop-msg">📂 Drop a CSV or Excel file to import</div>
+    </div>
+    <div class="gantt-wrap" id="ganttWrap">
+      <div style="text-align:center;padding:40px;color:#9ca3af;font-size:13px;">⏳ Loading…</div>
+    </div>
+  </div>
+
+  <p class="source-label" id="sourceLabel" style="margin-top:14px;"></p>
+
+  <!-- Legend & Notes panel — appears above the footer -->
+  <div style="margin-top:24px; padding:16px 18px; background:white; border:1px solid #e5e7eb; border-radius:10px;">
+    <div style="font-size:13px; font-weight:700; color:#111827; margin-bottom:10px;">Legend &amp; Notes</div>
+
+    <div style="font-size:11px; font-weight:700; color:#6b7280; text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px;">Bar &amp; calendar cell colors</div>
+    <table id="legendTable" style="width:100%; font-size:11px; border-collapse:collapse; margin-bottom:18px;">
+      <thead>
+        <tr style="text-align:left; color:#6b7280; border-bottom:1px solid #f3f4f6;">
+          <th style="padding:6px 8px; width:32px;">Color</th>
+          <th style="padding:6px 8px; width:200px;">Meaning</th>
+          <th style="padding:6px 8px;">Description</th>
+        </tr>
+      </thead>
+      <tbody id="legendTableBody"></tbody>
+    </table>
+
+    <div style="font-size:11px; font-weight:700; color:#6b7280; text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px;">Row statuses (filter dropdown)</div>
+    <table id="statusLegendTable" style="width:100%; font-size:11px; border-collapse:collapse;">
+      <thead>
+        <tr style="text-align:left; color:#6b7280; border-bottom:1px solid #f3f4f6;">
+          <th style="padding:6px 8px; width:32px;">Color</th>
+          <th style="padding:6px 8px; width:200px;">Status</th>
+          <th style="padding:6px 8px;">When a row is in this status</th>
+        </tr>
+      </thead>
+      <tbody id="statusLegendTableBody"></tbody>
+    </table>
+
+    <div style="margin-top:14px; font-size:11px; color:#4b5563; line-height:1.7;">
+      <div style="font-weight:700; color:#374151; margin-bottom:6px;">Notes</div>
+      <div>• <b>Hierarchy:</b> Project (P) ▸ Task (P-T) ▸ Subtask (P-T-S). Edit subtask data; tasks and projects roll up automatically.</div>
+      <div>• <b>Predecessors:</b> comma-separated list of IDs that must finish before this one can start (Finish-to-Start).</div>
+      <div>• <b>Slack (days):</b> how many days a subtask can be delayed without delaying the project end. Slack = 0 → critical path (★).</div>
+      <div>• <b>Critical path:</b> the chain of subtasks with Slack = 0 (★). Any delay on these slips the project finish — focus management attention here.</div>
+      <div>• <b>Cost Variance =</b> Cost-to-Date − Estimated. Negative (under budget) is good; positive (over budget) is bad.</div>
+      <div>• <b>Margin =</b> Sale Price − Cost-to-Date. % Done at task and project level rolls up from subtasks (weighted by Estimated Cost).</div>
+      <div>• <b>Row grouping:</b> use the ▾/▸ arrows next to project/task rows to collapse subtasks, or "⊟ Collapse" in the toolbar.</div>
+      <div>• <b>Saving:</b> the CSV download is the session store — reload it next time by attaching the file and re-running the gantt-chart skill.</div>
+    </div>
+  </div>
+
+  <!-- Footer logo -->
+  <div class="footer-bar" style="margin-top:40px;padding-top:16px;border-top:1px solid #e5e7eb;display:flex;align-items:center;justify-content:center;gap:12px;">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 90" width="160" height="46" aria-label="RenewTech Energy">
+      <circle cx="43" cy="38" r="28" fill="none" stroke="#1a6b2e" stroke-width="2.5"/>
+      <ellipse cx="43" cy="38" rx="28" ry="10" fill="none" stroke="#1a6b2e" stroke-width="1.6"/>
+      <ellipse cx="43" cy="38" rx="28" ry="19" fill="none" stroke="#1a6b2e" stroke-width="1.2"/>
+      <line x1="43" y1="10" x2="43" y2="66" stroke="#1a6b2e" stroke-width="1.6"/>
+      <ellipse cx="43" cy="38" rx="10" ry="28" fill="none" stroke="#1a6b2e" stroke-width="1.2"/>
+      <ellipse cx="43" cy="38" rx="19" ry="28" fill="none" stroke="#1a6b2e" stroke-width="1"/>
+      <path d="M52,14 C72,14 80,30 72,52 C64,62 50,66 38,60 C50,55 65,44 68,30 C60,36 48,46 38,54 C36,44 40,24 52,14Z" fill="#6dc03c"/>
+      <path d="M16,58 C10,48 10,28 22,18" fill="none" stroke="#1a6b2e" stroke-width="5" stroke-linecap="round"/>
+      <text x="82" y="34" font-family="'Segoe UI',Arial,sans-serif" font-size="28" font-weight="800" fill="#1a6b2e">Renew</text>
+      <text x="192" y="34" font-family="'Segoe UI',Arial,sans-serif" font-size="28" font-weight="800" fill="#6dc03c">Tech</text>
+      <line x1="82" y1="56" x2="100" y2="56" stroke="#6dc03c" stroke-width="2.5"/>
+      <text x="106" y="62" font-family="'Segoe UI',Arial,sans-serif" font-size="15" font-weight="700" letter-spacing="3" fill="#1a6b2e">ENERGY</text>
+      <line x1="222" y1="56" x2="242" y2="56" stroke="#6dc03c" stroke-width="2.5"/>
+    </svg>
+    <span style="font-size:10px;color:#9ca3af;">© 2026 RenewTech Energy</span>
+  </div>
+
+  <!-- Template picker modal -->
+  <div class="modal-overlay" id="tplModal" style="display:none" onclick="if(event.target===this)closeTplModal()">
+    <div class="modal" style="max-width:560px;">
+      <h3>📋 Load from Template</h3>
+      <p style="font-size:11px; color:#9ca3af; margin-bottom:10px;">
+        Pick a template, name your project, and choose its start date.
+        Tasks are auto-scheduled via CPM with working days only.
+      </p>
+      <div id="tpl-list" style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px;"></div>
+      <label>Project name<input id="tpl-name" type="text" placeholder="e.g. 100kW Bldg A Solar" oninput="refreshTplLoadBtn()"></label>
+      <div class="modal-grid">
+        <label>Start date<input id="tpl-start" type="date" onchange="refreshTplLoadBtn()"></label>
+        <label>Selected template<input id="tpl-selected" type="text" readonly style="background:#f9fafb;color:#6b7280;"></label>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-cancel" onclick="closeTplModal()">Cancel</button>
+        <button class="btn btn-ok" id="tpl-load-btn" onclick="loadFromTemplateModal()" disabled>Load template</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit modal — all 15 fields -->
+  <div class="modal-overlay" id="modal" style="display:none" onclick="if(event.target===this)closeModal()">
+    <div class="modal">
+      <h3 id="modalTitle">Edit Row</h3>
+      <div id="m-parent-row" style="display:none; margin-bottom:9px;">
+        <label>Parent <span style="font-weight:400; color:#9ca3af;">— pick which project/task this row goes under</span>
+          <select id="m-parent"></select>
+        </label>
+      </div>
+      <div class="modal-grid">
+        <label>ID<input id="m-id" type="text" placeholder="e.g. P1, P1-T1, P1-T1-S1"></label>
+        <label>Type
+          <select id="m-type">
+            <option value="project">🟢 Project</option>
+            <option value="task">🔵 Task</option>
+            <option value="subtask">🟣 Subtask</option>
+          </select>
+        </label>
+      </div>
+      <label>Project / Task / Subtask name<input id="m-name" type="text" placeholder="e.g. 100kW Rooftop Solar"></label>
+      <div class="modal-grid">
+        <label>Owner<input id="m-owner" type="text" placeholder="e.g. Jack Z"></label>
+        <div id="m-predecessors-row">
+          <label>Predecessors <span style="font-weight:400; color:#9ca3af;">— only subtasks have predecessors</span>
+            <div style="display:flex; gap:6px; align-items:stretch;">
+              <input id="m-predecessors" type="text" placeholder="e.g. P1-T1-S1, P1-T1-S2" style="flex:1;">
+              <button type="button" class="btn btn-cancel" style="white-space:nowrap;" onclick="openPredecessorsPicker()">Pick…</button>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-label">Scheduled dates</div>
+        <div class="modal-grid">
+          <label>Sched. Start<input id="m-sched-start" type="date"></label>
+          <label>Sched. End<input id="m-sched-end" type="date"></label>
+        </div>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-label">Actual dates</div>
+        <div class="modal-grid">
+          <label>Actual Start<input id="m-actual-start" type="date"></label>
+          <label>Actual End<input id="m-actual-end" type="date"></label>
+        </div>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-label">Progress</div>
+        <div class="modal-grid">
+          <label>Slack (days)<input id="m-slack" type="number" step="1" placeholder="e.g. 3"></label>
+          <label>% Done<input id="m-percent-done" type="number" min="0" max="100" step="1" placeholder="0-100"></label>
+        </div>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-label">Costs &amp; budget</div>
+        <div id="m-rollup-notice" style="display:none; font-size:11px; color:#92400e; background:#fef3c7; padding:6px 10px; border-radius:6px; margin-bottom:8px;">
+          ⌃ This row has children — costs below show the rolled-up sum and can't be edited directly. Edit subtasks to change them.
+        </div>
+        <div class="modal-grid">
+          <label>Estimated Cost ($) <span style="font-weight:400; color:#9ca3af;">— this is your budget</span><input id="m-est-cost" type="number" step="0.01" placeholder="0.00"></label>
+          <label>Cost to Date ($)<input id="m-cost-date" type="number" step="0.01" placeholder="0.00"></label>
+        </div>
+        <div class="modal-grid">
+          <label class="modal-readonly">Cost Variance ($)<input id="m-cost-variance" type="number" step="0.01" readonly></label>
+          <label>&nbsp;</label>
+        </div>
+        <div id="m-budget-status" style="font-size:11px; padding:6px 10px; border-radius:6px; margin-top:6px; display:none;"></div>
+        <p style="font-size:10px;color:#9ca3af;margin-top:6px;">Cost Variance = Cost-to-Date − Estimated.  Estimated Cost is treated as the budget for the over/under indicator.</p>
+      </div>
+
+      <!-- Project-only sale/margin section -->
+      <div class="modal-section" id="m-sale-section">
+        <div class="modal-section-label">Sale &amp; margin (projects only)</div>
+        <div class="modal-grid">
+          <label>Sale Price ($)<input id="m-sale-price" type="number" step="0.01" placeholder="0.00"></label>
+          <label class="modal-readonly">Final Margin ($)<input id="m-margin" type="number" step="0.01" readonly></label>
+        </div>
+        <p style="font-size:10px;color:#9ca3af;margin-top:4px;">Final Margin = Sale Price − Cost to Date (rolled up from all subtasks).</p>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn btn-del" id="modalDelBtn" onclick="deleteFromModal()">🗑 Delete</button>
+        <button class="btn btn-cancel" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-ok" onclick="saveModal()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="drag-tip" id="dragTip"></div>
+  <div class="tip" id="tip"></div>
+
+  <script>
+  /* ══════════════════════════════════════════════════════════════
+     EMBEDDED DATA (replaced by build_artifact.py)
+  ══════════════════════════════════════════════════════════════ */
+  const EMBEDDED = /*__GANTT_DATA__*/null;
+
+  /* ══════════════════════════════════════════════════════════════
+     CONSTANTS — fixed 15-field schema
+  ══════════════════════════════════════════════════════════════ */
+  const FIELDS = [
+    'id','name','owner','predecessors',
+    'sched_start','sched_end','actual_start','actual_end',
+    'slack','percent_done',
+    'est_cost','cost_to_date','cost_variance','sale_price','margin',
+  ];
+
+  // Display labels for Excel header row and modal
+  const FIELD_LABELS = {
+    id: 'ID',
+    name: 'Project / Task / Subtask',
+    owner: 'Owner',
+    predecessors: 'Predecessors',
+    sched_start: 'Sched. Start',
+    sched_end: 'Sched. End',
+    actual_start: 'Actual Start',
+    actual_end: 'Actual End',
+    slack: 'Slack (days)',
+    percent_done: '% Done',
+    est_cost: 'Estimated Cost ($)',
+    cost_to_date: 'Cost to Date ($)',
+    cost_variance: 'Cost Variance ($)',
+    sale_price: 'Sale Price ($)',
+    margin: 'Margin ($)',
+  };
+
+  const TYPE_PREFIXES = { project: 'P', task: 'T', subtask: 'S' };
+
+  // ── RenewTech standard legend (10 entries) ──
+  const LEGEND = {
+    scheduled_non_critical: { color: '#9DC3E6', label: 'Scheduled (non-critical)',  desc: 'Cell falls within planned start–end.' },
+    scheduled_critical:     { color: '#E06666', label: 'Scheduled (critical path)', desc: 'Same as above but slack = 0.' },
+    actual_progress:        { color: '#548235', label: 'Actual progress',           desc: 'Actual work occurred this week.' },
+    scheduled_and_actual:   { color: '#2E75B6', label: 'Scheduled + Actual',        desc: 'Planned + actual work overlap.' },
+    delay_overrun:          { color: '#C00000', label: 'Delay / overrun',           desc: 'Actual work past planned end.' },
+    late_start:             { color: '#ED7D31', label: 'Late start',                desc: 'Scheduled passed but not started.' },
+    critical_path_row:      { color: '#FFE6E6', label: 'Critical-path row',         desc: 'Subtask with slack = 0 (★).' },
+    project_header:         { color: '#1F4E78', label: 'Project header',            desc: 'Roll-up row aggregating tasks.' },
+    task_summary:           { color: '#BDD7EE', label: 'Task summary',              desc: 'Roll-up row aggregating subtasks.' },
+    today:                  { color: '#FFE699', label: 'Today',                     desc: 'Week containing the status date.' },
+  };
+
+  // Status colors used for bar fills in the HTML chart (derives from % Done + slack + dates)
+  const STATUS_COLORS = {
+    'Not Started': LEGEND.scheduled_non_critical.color,
+    'In Progress': LEGEND.scheduled_and_actual.color,
+    'Critical':    LEGEND.scheduled_critical.color,
+    'Late Start':  LEGEND.late_start.color,
+    'At Risk':     LEGEND.delay_overrun.color,
+    'Completed':   LEGEND.actual_progress.color,
+  };
+  // Human-readable explanation of how each status is derived
+  const STATUS_MEANINGS = {
+    'Not Started': '% Done = 0 and scheduled start is still in the future. Nothing to worry about yet.',
+    'In Progress': 'Work is underway (% Done > 0, < 100) and the row has slack — i.e. some buffer before it would delay the project.',
+    'Critical':    'Work is underway and Slack = 0. Any delay will slip the project finish — focus management attention here.',
+    'Late Start':  'Scheduled start has passed but no work has started (% Done = 0). The row is already behind plan.',
+    'At Risk':     'Scheduled end has passed but the row is not 100% done. The project finish may slip.',
+    'Completed':   '% Done = 100. Work is finished.',
+  };
+
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const MS_DAY = 86400000;
+  // Each build gets a unique session_id so empty artifacts don't share localStorage.
+  // Falls back to source_file for legacy artifacts; final fallback to 'default'.
+  const LS_KEY = 'gantt_v3_' + (EMBEDDED?.session_id || EMBEDDED?.source_file || 'default');
+
+  /* ══════════════════════════════════════════════════════════════
+     STATE — single tree of nodes
+  ══════════════════════════════════════════════════════════════ */
+  // Each node: { id, type, parent_id, name, owner, predecessors,
+  //              sched_start, sched_end, actual_start, actual_end,
+  //              slack, percent_done, est_cost, cost_to_date, sale_price,
+  //              collapsed: bool }
+  // cost_variance and margin are computed.
+  let NODES = [];
+  let SOURCE = { file: '', title: 'Project Gantt' };
+  let dirty = false;
+  let modalIdx = -1;
+  let tlRect = null;
+  let dateRange = null;
+  let drag = null;
+
+  /* ══════════════════════════════════════════════════════════════
+     UNDO / REDO HISTORY
+  ══════════════════════════════════════════════════════════════ */
+  let HISTORY = [];
+  let FUTURE  = [];
+  const HISTORY_LIMIT = 50;
+
+  function pushHistory() {
+    try {
+      HISTORY.push(JSON.stringify(NODES));
+      if (HISTORY.length > HISTORY_LIMIT) HISTORY.shift();
+      FUTURE = [];
+    } catch (e) { console.warn('history snapshot failed', e); }
+  }
+  function undo() {
+    if (!HISTORY.length) { flashHint('Nothing to undo'); return; }
+    FUTURE.push(JSON.stringify(NODES));
+    NODES = JSON.parse(HISTORY.pop());
+    saveLocal(); populateFilters(); render();
+    flashHint('↶ Undo');
+  }
+  function redo() {
+    if (!FUTURE.length) { flashHint('Nothing to redo'); return; }
+    HISTORY.push(JSON.stringify(NODES));
+    NODES = JSON.parse(FUTURE.pop());
+    saveLocal(); populateFilters(); render();
+    flashHint('↷ Redo');
+  }
+  function flashHint(text) {
+    let el = document.getElementById('undoHint');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'undoHint';
+      el.style.cssText = 'position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:#111827; color:white; padding:6px 14px; border-radius:6px; font-size:12px; font-weight:600; z-index:11000; opacity:0; transition:opacity .15s; pointer-events:none;';
+      document.body.appendChild(el);
+    }
+    el.textContent = text;
+    el.style.opacity = '1';
+    clearTimeout(flashHint._t);
+    flashHint._t = setTimeout(() => el.style.opacity = '0', 900);
+  }
+  /* ══════════════════════════════════════════════════════════════
+     SELECTION + COPY / PASTE
+  ══════════════════════════════════════════════════════════════ */
+  let selectedNodeIdx = -1;
+  let CLIPBOARD = null;
+
+  function setSelected(idx) {
+    selectedNodeIdx = idx;
+    // Update visual outline without a full render
+    document.querySelectorAll('.gantt-row').forEach(r => r.classList.remove('is-selected'));
+    if (idx >= 0) {
+      document.querySelectorAll('.gantt-row').forEach(r => {
+        if (parseInt(r.dataset.nodeidx) === idx) r.classList.add('is-selected');
+      });
+    }
+  }
+
+  function copySelected() {
+    if (selectedNodeIdx < 0) { flashHint('Right-click or click a row first, then ⌘C'); return; }
+    const root = NODES[selectedNodeIdx];
+    if (!root) return;
+    const subtree = NODES.filter(n => n.id === root.id || n.id.startsWith(root.id + '-'));
+    CLIPBOARD = {
+      rootId: root.id,
+      rootType: typeFromId(root.id),
+      nodes: subtree.map(n => ({...n})),
+    };
+    flashHint(`📋 Copied ${root.id} (${subtree.length} row${subtree.length === 1 ? '' : 's'})`);
+  }
+
+  /* Validate paste destination given hierarchy rules:
+       project → always pastes at root
+       task    → must target a Project row
+       subtask → must target a Task row */
+  function pasteTargetCheck() {
+    if (!CLIPBOARD) return null;
+    const sourceType = CLIPBOARD.rootType;
+    if (selectedNodeIdx < 0) {
+      if (sourceType === 'project') return { ok: true, parentId: null, msg: 'Will paste as new top-level project' };
+      return { ok: true, parentId: parentOf(CLIPBOARD.rootId) || null,
+               msg: `Will paste under ${parentOf(CLIPBOARD.rootId) || 'root'} (same as original)` };
+    }
+    const target = NODES[selectedNodeIdx];
+    if (!target) return null;
+    const targetType = typeFromId(target.id);
+    if (sourceType === 'project')
+      return { ok: true, parentId: null, msg: 'Will paste as new top-level project' };
+    if (sourceType === 'task' && targetType !== 'project')
+      return { ok: false, msg: `Tasks must go under a Project (you selected a ${targetType}).` };
+    if (sourceType === 'subtask' && targetType !== 'task')
+      return { ok: false, msg: `Subtasks must go under a Task (you selected a ${targetType}).` };
+    return { ok: true, parentId: target.id, msg: `Will paste under ${target.id} — ${target.name||''}` };
+  }
+
+  function pasteCopied() {
+    if (!CLIPBOARD) { flashHint('Clipboard empty — copy something first with ⌘C'); return; }
+    const check = pasteTargetCheck();
+    if (!check) { flashHint('Click a target row first'); return; }
+    if (!check.ok) { flashHint('⚠ ' + check.msg); return; }
+    pushHistory();
+    const oldRoot = CLIPBOARD.rootId;
+    const newRootId = nextId(check.parentId || null);
+
+    const idMap = { [oldRoot]: newRootId };
+    CLIPBOARD.nodes.forEach(n => {
+      if (n.id === oldRoot) return;
+      idMap[n.id] = newRootId + n.id.slice(oldRoot.length);
+    });
+
+    CLIPBOARD.nodes.forEach(orig => {
+      const copy = {...orig, id: idMap[orig.id]};
+      if (copy.predecessors)
+        copy.predecessors = parsePreds(copy.predecessors)
+          .map(p => idMap[p] || p)
+          .join(', ');
+      NODES.push(copy);
+    });
+
+    selectedProjects.add(newRootId.split('-')[0]);
+    saveLocal(); populateFilters(); render();
+    flashHint(`📋 Pasted as ${newRootId} (${CLIPBOARD.nodes.length} row${CLIPBOARD.nodes.length === 1 ? '' : 's'})`);
+  }
+
+  /* ── Drag-to-reparent (row label only — bar drag still shifts dates) ── */
+  let reparentDrag = null;
+
+  function onRowDragStart(e, nodeIdx) {
+    const n = NODES[nodeIdx];
+    reparentDrag = { nodeIdx, rootId: n.id, type: typeFromId(n.id) };
+    try {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', n.id);
+    } catch(_) {}
+  }
+
+  function onRowDragOver(e, targetIdx) {
+    if (!reparentDrag) return;
+    e.preventDefault();
+    const target = NODES[targetIdx];
+    const ok = canReparent(reparentDrag.type, typeFromId(target.id), reparentDrag.rootId, target.id);
+    e.dataTransfer.dropEffect = ok ? 'move' : 'none';
+    const rowEl = e.currentTarget.closest('.gantt-row');
+    document.querySelectorAll('.gantt-row').forEach(r => r.classList.remove('drop-valid','drop-invalid'));
+    if (rowEl) rowEl.classList.add(ok ? 'drop-valid' : 'drop-invalid');
+  }
+
+  function onRowDrop(e, targetIdx) {
+    if (!reparentDrag) return;
+    e.preventDefault();
+    const target = NODES[targetIdx];
+    const sourceType = reparentDrag.type;
+    const targetType = typeFromId(target.id);
+    if (!canReparent(sourceType, targetType, reparentDrag.rootId, target.id)) {
+      flashHint(`⚠ ${cap1(sourceType)}s can't be moved under a ${targetType}`);
+      cleanupReparentDrag();
+      return;
+    }
+    pushHistory();
+    const parentId = sourceType === 'project' ? null : target.id;
+    const newRootId = nextId(parentId);
+    const oldRoot = reparentDrag.rootId;
+    const subtree = NODES.filter(n => n.id === oldRoot || n.id.startsWith(oldRoot + '-'));
+    const idMap = { [oldRoot]: newRootId };
+    subtree.forEach(n => { if (n.id !== oldRoot) idMap[n.id] = newRootId + n.id.slice(oldRoot.length); });
+    const moved = subtree.map(orig => {
+      const copy = {...orig, id: idMap[orig.id]};
+      if (copy.predecessors)
+        copy.predecessors = parsePreds(copy.predecessors).map(p => idMap[p] || p).join(', ');
+      return copy;
+    });
+    NODES = NODES.filter(n => !subtree.includes(n)).concat(moved);
+    selectedProjects.add(newRootId.split('-')[0]);
+    cleanupReparentDrag();
+    saveLocal(); populateFilters(); render();
+    flashHint(`↔ Moved ${oldRoot} → ${newRootId}`);
+  }
+
+  function canReparent(sourceType, targetType, sourceId, targetId) {
+    if (sourceType === 'project') return false;       // projects don't reparent
+    if (targetId === sourceId) return false;
+    if (targetId.startsWith(sourceId + '-')) return false;   // no dropping into own descendant
+    if (sourceType === 'task'    && targetType !== 'project') return false;
+    if (sourceType === 'subtask' && targetType !== 'task')    return false;
+    return true;
+  }
+
+  function cleanupReparentDrag() {
+    reparentDrag = null;
+    document.querySelectorAll('.gantt-row').forEach(r => r.classList.remove('drop-valid','drop-invalid'));
+  }
+
+  function cap1(s){ return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+
+  // Global keyboard shortcuts — skip when typing in an input/textarea/select
+  document.addEventListener('keydown', e => {
+    const tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+    const mod = e.metaKey || e.ctrlKey;
+    if (!mod) return;
+    if (e.key === 'z' || e.key === 'Z') {
+      e.preventDefault();
+      if (e.shiftKey) redo(); else undo();
+    } else if (e.key === 'y' || e.key === 'Y') {
+      e.preventDefault(); redo();
+    } else if (e.key === 'c' || e.key === 'C') {
+      e.preventDefault(); copySelected();
+    } else if (e.key === 'v' || e.key === 'V') {
+      e.preventDefault(); pasteCopied();
+    }
+  });
+
+  /* ══════════════════════════════════════════════════════════════
+     PROJECT TEMPLATES — parsed from references/project_templates.md
+     and baked into the artifact by build_artifact.py.
+  ══════════════════════════════════════════════════════════════ */
+  const TEMPLATES = (EMBEDDED && EMBEDDED.templates) || {};
+
+  /* CPM forward + backward pass — ported from scripts/scheduler.py.
+     Each template task: { tid, name, dur:[lo,hi], preds:[tid,...] }
+     Returns ES/EF/LS/LF in working-day offsets + a dateAt(offset) helper. */
+  function solveCPM(tasks, projectStartISO, workingDaysOnly) {
+    const byId = Object.fromEntries(tasks.map(t => [t.tid, t]));
+    const inDeg = {}, succ = {};
+    tasks.forEach(t => { inDeg[t.tid] = (t.preds || []).length; succ[t.tid] = []; });
+    tasks.forEach(t => (t.preds || []).forEach(p => { if (succ[p]) succ[p].push(t.tid); }));
+    const queue = tasks.filter(t => inDeg[t.tid] === 0).map(t => t.tid);
+    const order = [];
+    while (queue.length) {
+      const u = queue.shift(); order.push(u);
+      succ[u].forEach(v => { inDeg[v]--; if (inDeg[v] === 0) queue.push(v); });
+    }
+    if (order.length < tasks.length) throw new Error('Template has a dependency cycle');
+
+    // Forward — use upper-bound duration (conservative for committed dates)
+    const ES = {}, EF = {};
+    order.forEach(u => {
+      const d = byId[u].dur[1];
+      const preds = byId[u].preds || [];
+      ES[u] = preds.length ? Math.max(...preds.map(p => EF[p])) : 0;
+      EF[u] = ES[u] + d;
+    });
+    const T = Math.max(0, ...Object.values(EF));
+
+    // Backward — for slack
+    const LS = {}, LF = {};
+    [...order].reverse().forEach(u => {
+      const d = byId[u].dur[1];
+      const outs = succ[u];
+      LF[u] = outs.length ? Math.min(...outs.map(v => LS[v])) : T;
+      LS[u] = LF[u] - d;
+    });
+
+    const slack = Object.fromEntries(tasks.map(t => [t.tid, LS[t.tid] - ES[t.tid]]));
+    const start = new Date(projectStartISO);
+    const offsetToDate = (offset) => {
+      if (!workingDaysOnly) {
+        const d = new Date(start); d.setDate(d.getDate() + offset); return d;
+      }
+      let d = new Date(start), remaining = offset;
+      while (remaining > 0) {
+        d.setDate(d.getDate() + 1);
+        const dow = d.getDay();
+        if (dow !== 0 && dow !== 6) remaining--;
+      }
+      return d;
+    };
+    return { ES, EF, LS, LF, slack, T, dateAt: offsetToDate };
+  }
+
+  function openTemplatePicker() {
+    const keys = Object.keys(TEMPLATES);
+    if (!keys.length) {
+      alert('No templates found. Add some to references/project_templates.md and re-run the gantt-chart skill.');
+      return;
+    }
+    const listEl = document.getElementById('tpl-list');
+    listEl.innerHTML = keys.map(k => {
+      const t = TEMPLATES[k];
+      return `<div class="tpl-card" data-key="${esc(k)}" onclick="selectTemplate('${esc(k)}')"
+                style="border:1px solid #e5e7eb; border-radius:8px; padding:10px; cursor:pointer; background:white; transition:all .15s;">
+        <div style="font-weight:700; font-size:13px; color:#0e7490;">Template ${esc(k)}</div>
+        <div style="font-size:12px; margin-top:2px; color:#111827;">${esc(t.name)}</div>
+        <div style="font-size:11px; color:#9ca3af; margin-top:4px;">${t.tasks.length} tasks${t.span ? ' · ' + esc(t.span) : ''}</div>
+      </div>`;
+    }).join('');
+    document.getElementById('tpl-name').value = '';
+    document.getElementById('tpl-start').value = fmtDate(new Date());
+    document.getElementById('tpl-selected').value = '';
+    document.getElementById('tpl-selected').dataset.key = '';
+    document.getElementById('tpl-load-btn').disabled = true;
+    document.getElementById('tplModal').style.display = 'flex';
+    setTimeout(() => document.getElementById('tpl-name').focus(), 50);
+  }
+
+  function selectTemplate(key) {
+    document.querySelectorAll('#tpl-list .tpl-card').forEach(c => {
+      const selected = c.dataset.key === key;
+      c.style.background  = selected ? '#cffafe' : 'white';
+      c.style.borderColor = selected ? '#0e7490' : '#e5e7eb';
+    });
+    document.getElementById('tpl-selected').value = key + ' — ' + TEMPLATES[key].name;
+    document.getElementById('tpl-selected').dataset.key = key;
+    refreshTplLoadBtn();
+  }
+
+  function refreshTplLoadBtn() {
+    const hasName = !!document.getElementById('tpl-name').value.trim();
+    const hasKey  = !!(document.getElementById('tpl-selected').dataset.key || '');
+    const hasDate = !!document.getElementById('tpl-start').value;
+    document.getElementById('tpl-load-btn').disabled = !(hasName && hasKey && hasDate);
+  }
+
+  function loadFromTemplateModal() {
+    const key = document.getElementById('tpl-selected').dataset.key;
+    const name = document.getElementById('tpl-name').value.trim();
+    const start = document.getElementById('tpl-start').value;
+    if (!key || !name || !start) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) { alert('Invalid start date'); return; }
+    closeTplModal();
+    loadFromTemplate(key, name, start);
+  }
+
+  function closeTplModal() {
+    document.getElementById('tplModal').style.display = 'none';
+  }
+
+  function loadFromTemplate(templateKey, projectName, startISO) {
+    const tpl = TEMPLATES[templateKey];
+    pushHistory();
+
+    let result;
+    try { result = solveCPM(tpl.tasks, startISO, true); }
+    catch (err) { alert('Could not schedule template: ' + err.message); return; }
+
+    // Next free project number
+    const projNums = NODES
+      .filter(n => /^P\d+$/.test(n.id))
+      .map(n => parseInt(n.id.slice(1)));
+    const pNum = projNums.length ? Math.max(...projNums) + 1 : 1;
+    const pid = `P${pNum}`;
+
+    // Group tasks by phase number (first segment of tid like "1.1" → phase "1")
+    const phaseMap = {};
+    tpl.tasks.forEach(t => {
+      const phase = t.tid.split('.')[0];
+      (phaseMap[phase] = phaseMap[phase] || []).push(t);
+    });
+
+    // Phase names: derived from the markdown (carried on tpl.phases if present)
+    // — fall back to "Phase N" if the build step didn't extract them.
+    const phaseNames = tpl.phases || {};
+
+    // Project row spans whole result
+    const projStart = result.dateAt(0);
+    const projEnd   = result.dateAt(result.T);
+    NODES.push({
+      id: pid, type: 'project', name: projectName,
+      owner: '', predecessors: '',
+      sched_start: fmtDate(projStart), sched_end: fmtDate(projEnd),
+      actual_start: fmtDate(projStart), actual_end: fmtDate(projEnd),
+      slack: '', percent_done: 0,
+      est_cost: '', cost_to_date: '', sale_price: '',
+      collapsed: false,
+    });
+
+    const sortedPhases = Object.keys(phaseMap).sort((a, b) => parseInt(a) - parseInt(b));
+    // Map original tid → new subtask id (so predecessors can be rewritten)
+    const idMap = {};
+    sortedPhases.forEach((phaseNum, pi) => {
+      const taskId = `${pid}-T${pi + 1}`;
+      phaseMap[phaseNum].forEach((t, si) => {
+        idMap[t.tid] = `${taskId}-S${si + 1}`;
+      });
+    });
+
+    sortedPhases.forEach((phaseNum, pi) => {
+      const tasksInPhase = phaseMap[phaseNum];
+      const taskId = `${pid}-T${pi + 1}`;
+      const phaseStarts = tasksInPhase.map(t => result.dateAt(result.ES[t.tid]));
+      const phaseEnds   = tasksInPhase.map(t => result.dateAt(result.EF[t.tid]));
+      const tStart = new Date(Math.min(...phaseStarts.map(d => +d)));
+      const tEnd   = new Date(Math.max(...phaseEnds.map(d => +d)));
+      const phaseName = phaseNames[phaseNum] || `Phase ${phaseNum}`;
+      NODES.push({
+        id: taskId, type: 'task', name: phaseName,
+        owner: '', predecessors: '',
+        sched_start: fmtDate(tStart), sched_end: fmtDate(tEnd),
+        actual_start: fmtDate(tStart), actual_end: fmtDate(tEnd),
+        slack: '', percent_done: 0,
+        est_cost: '', cost_to_date: '', sale_price: '',
+        collapsed: false,
+      });
+      tasksInPhase.forEach((t, si) => {
+        const subId = idMap[t.tid];
+        const sStart = result.dateAt(result.ES[t.tid]);
+        const sEnd   = result.dateAt(result.EF[t.tid]);
+        const preds = (t.preds || []).map(p => idMap[p]).filter(Boolean).join(', ');
+        NODES.push({
+          id: subId, type: 'subtask', name: t.name,
+          owner: '', predecessors: preds,
+          sched_start: fmtDate(sStart), sched_end: fmtDate(sEnd),
+          actual_start: fmtDate(sStart), actual_end: fmtDate(sEnd),
+          slack: String(result.slack[t.tid]),
+          percent_done: 0,
+          est_cost: '', cost_to_date: '', sale_price: '',
+          collapsed: false,
+        });
+      });
+    });
+
+    selectedProjects.add(pid);
+    saveLocal(); populateFilters(); render();
+    flashHint(`📋 Loaded template ${templateKey} — ${tpl.tasks.length} tasks scheduled`);
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     AUTO-RESCHEDULE — propagate date changes through the predecessor
+     graph of one project. Pulls descendants earlier when possible,
+     shifts them later when a predecessor slipped.
+  ══════════════════════════════════════════════════════════════ */
+  function parsePreds(s) {
+    if (!s) return [];
+    return s.split(/[,;]/).map(x => x.trim()).filter(Boolean);
+  }
+
+  /* Full CPM forward + backward pass on one project.
+     Forward: snap each leaf's actual_start to max(predecessor end), preserve duration.
+     Backward: compute slack (LS - ES) for the critical-path tinting.
+     Skips parent rows (their dates are derived). Returns { shifted, cycle }. */
+  function runCPM(projectId) {
+    const peers = NODES.filter(n => n.id.split('-')[0] === projectId && n.id !== projectId);
+    const leaves = peers.filter(n => childrenOf(n).length === 0);
+    if (!leaves.length) return { shifted: 0, cycle: false };
+
+    const byId = Object.fromEntries(peers.map(n => [n.id, n]));
+    const succ = {}, preds = {};
+    leaves.forEach(n => { succ[n.id] = []; preds[n.id] = parsePreds(n.predecessors).filter(p => byId[p]); });
+    leaves.forEach(n => preds[n.id].forEach(p => { if (succ[p]) succ[p].push(n.id); }));
+
+    const inDeg = {}; leaves.forEach(n => inDeg[n.id] = preds[n.id].length);
+    const queue = leaves.filter(n => inDeg[n.id] === 0).map(n => n.id);
+    const order = [];
+    while (queue.length) {
+      const u = queue.shift(); order.push(u);
+      (succ[u] || []).forEach(v => { inDeg[v]--; if (inDeg[v] === 0) queue.push(v); });
+    }
+    if (order.length < leaves.length) return { cycle: true, shifted: 0 };
+
+    // Duration from stored dates — preserved across shifts
+    const duration = {};
+    leaves.forEach(n => {
+      const s = new Date(n.actual_start || n.sched_start);
+      const e = new Date(n.actual_end   || n.sched_end);
+      duration[n.id] = (isNaN(s) || isNaN(e)) ? 1 : Math.max(0, Math.round((e - s) / MS_DAY));
+    });
+
+    // Forward — snap each leaf to max(pred ends)
+    const startDate = {};
+    let shifted = 0;
+    for (const u of order) {
+      const n = byId[u];
+      if (preds[u].length === 0) {
+        const s = new Date(n.actual_start || n.sched_start);
+        startDate[u] = isNaN(s) ? new Date() : s;
+      } else {
+        const predEndMs = preds[u].map(p => {
+          const pn = byId[p];
+          if (childrenOf(pn).length > 0) {
+            const e = new Date(eActualEnd(pn) || eSchedEnd(pn));
+            return isNaN(e) ? 0 : +e;
+          }
+          return startDate[p] ? +addDays(startDate[p], duration[p]) : 0;
+        });
+        const earliestStart = new Date(Math.max(...predEndMs));
+        const curStart = new Date(n.actual_start || n.sched_start);
+        // One-way constraint: shift FORWARD if user is earlier than required.
+        // If they've already pushed it past pred end, leave it alone — that's allowed slack.
+        if (isNaN(curStart) || +curStart < +earliestStart - MS_DAY / 2) {
+          n.actual_start = fmtDate(earliestStart);
+          n.actual_end   = fmtDate(addDays(earliestStart, duration[u]));
+          startDate[u]   = earliestStart;
+          shifted++;
+        } else {
+          startDate[u]   = curStart;
+        }
+      }
+    }
+
+    // Backward — compute slack in absolute day units
+    const startDay = {}, endDay = {};
+    for (const u of order) {
+      startDay[u] = Math.round(+startDate[u] / MS_DAY);
+      endDay[u]   = startDay[u] + duration[u];
+    }
+    const T = Math.max(...Object.values(endDay));
+    const LF = {}, LS = {};
+    [...order].reverse().forEach(u => {
+      const outs = succ[u] || [];
+      LF[u] = outs.length ? Math.min(...outs.map(v => LS[v])) : T;
+      LS[u] = LF[u] - duration[u];
+    });
+    leaves.forEach(n => {
+      const sl = LS[n.id] - startDay[n.id];
+      n.slack = String(Math.max(0, sl));
+    });
+
+    return { shifted, cycle: false };
+  }
+
+  function autoReschedule(changedNodeId) {
+    if (!changedNodeId) return { shifted: [] };
+    const projectId = changedNodeId.split('-')[0];
+    const r = runCPM(projectId);
+    return { shifted: Array(r.shifted || 0), cycle: !!r.cycle };
+  }
+
+  function recalcAll() {
+    if (!NODES.length) { flashHint('Nothing to recalculate'); return; }
+    pushHistory();
+    const projectIds = new Set(NODES.map(n => n.id.split('-')[0]));
+    let totalShifted = 0, cycles = 0;
+    projectIds.forEach(pid => {
+      const r = runCPM(pid);
+      if (r.cycle) cycles++;
+      totalShifted += r.shifted || 0;
+    });
+    saveLocal(); render();
+    if (cycles) flashHint(`⚠ ${cycles} project${cycles===1?'':'s'} have predecessor cycles`);
+    else        flashHint(`🔄 CPM done — ${totalShifted} task${totalShifted===1?'':'s'} shifted, critical path updated`);
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     INIT
+  ══════════════════════════════════════════════════════════════ */
+  document.addEventListener('DOMContentLoaded', () => {
+    const local = loadLocal();
+    if (local) {
+      ({NODES, SOURCE} = local);
+      if (local.MAX_SLACK_CAP != null) {
+        MAX_SLACK_CAP = local.MAX_SLACK_CAP;
+        const inp = document.getElementById('maxSlackCap');
+        if (inp) inp.value = local.MAX_SLACK_CAP;
+      }
+      dirty = true;
+      document.getElementById('dirtyBadge').style.display = '';
+    } else if (EMBEDDED) {
+      NODES   = (EMBEDDED.nodes || []).slice();
+      SOURCE  = { file: EMBEDDED.source_file || '', title: EMBEDDED.title || 'Project Gantt' };
+    }
+    document.getElementById('titleText').textContent = SOURCE.title || 'Project Gantt';
+    document.getElementById('sourceLabel').textContent = SOURCE.file ? `Source: ${SOURCE.file}` : 'Started from scratch';
+    renderLegend();
+    populateFilters();
+    render();
+  });
+
+  /* ══════════════════════════════════════════════════════════════
+     EDITABLE TITLE
+  ══════════════════════════════════════════════════════════════ */
+  function startEditTitle() {
+    const span = document.getElementById('titleText');
+    const current = SOURCE.title || 'Project Gantt';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = current;
+    input.style.cssText = 'font-size:17px; font-weight:700; color:#111827; padding:2px 6px; border:1px solid #1a6b2e; border-radius:4px; outline:none; min-width:300px; font-family:inherit;';
+    span.replaceWith(input);
+    input.focus();
+    input.select();
+
+    const commit = () => {
+      const newTitle = input.value.trim() || current;
+      SOURCE.title = newTitle;
+      saveLocal();
+      const newSpan = document.createElement('span');
+      newSpan.id = 'titleText';
+      newSpan.title = 'Click to rename';
+      newSpan.style.cssText = 'cursor:text; padding:2px 4px; border-radius:4px; transition:background .15s;';
+      newSpan.textContent = newTitle;
+      newSpan.onclick = startEditTitle;
+      newSpan.onmouseover = () => newSpan.style.background = '#f3f4f6';
+      newSpan.onmouseout  = () => newSpan.style.background = 'transparent';
+      input.replaceWith(newSpan);
+    };
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') input.blur();
+      if (e.key === 'Escape') { input.value = current; input.blur(); }
+    });
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     COMPUTED FIELDS
+  ══════════════════════════════════════════════════════════════ */
+  // Default margin used when auto-calculating Sale Price from Estimated Cost.
+  // Sale = Est / (1 - margin) so that Margin/Sale = 40% by default.
+  const DEFAULT_MARGIN = 0.40;
+
+  /* Effective slack — for leaves, parse the stored field.
+     For parents, the min of all descendant leaves' slacks.
+     A row is "critical" iff its effective slack is 0 — so a project tints red
+     if ANY descendant is on the critical path. */
+  let MAX_SLACK_CAP = null;   // null = no cap
+  function onMaxSlackChange() {
+    const v = parseFloat(document.getElementById('maxSlackCap').value);
+    MAX_SLACK_CAP = isNaN(v) ? null : Math.max(0, v);
+    saveLocal();
+    render();
+    flashHint(MAX_SLACK_CAP == null
+      ? 'Slack cap cleared'
+      : `Slack cap set to ${MAX_SLACK_CAP} day${MAX_SLACK_CAP===1?'':'s'}`);
+  }
+
+  function eSlack(node) {
+    const kids = childrenOf(node);
+    if (kids.length === 0) {
+      const v = parseFloat(node.slack);
+      if (isNaN(v)) return Infinity;
+      return MAX_SLACK_CAP == null ? v : Math.min(v, MAX_SLACK_CAP);
+    }
+    return Math.min(...kids.map(eSlack));
+  }
+  function isCriticalPath(node) {
+    const s = eSlack(node);
+    return isFinite(s) && s === 0;
+  }
+
+  /* ── Cost roll-up ──
+     Parent rows display the sum of their children's effective values (recursive).
+     A leaf row uses its own stored value. */
+  function childrenOf(node) {
+    return NODES.filter(n => parentOf(n.id) === node.id);
+  }
+  function getEffective(node, field) {
+    const kids = childrenOf(node);
+    if (kids.length === 0) {
+      const v = parseFloat(node[field]);
+      return isNaN(v) ? 0 : v;
+    }
+    return kids.reduce((s, k) => s + getEffective(k, field), 0);
+  }
+  // Convenience for displays — Estimated Cost is the budget baseline.
+  const eEst    = n => getEffective(n, 'est_cost');
+  const eSpent  = n => getEffective(n, 'cost_to_date');
+  // Sale Price lives only on project rows — don't roll up across hierarchy
+  const eSale = n => parseFloat(n.sale_price) || 0;
+
+  /* ── Date roll-up ──
+     Parent rows show min/max of their descendants' dates (recursive).
+     A leaf row uses its own stored values. Mirrors getEffective() for costs. */
+  function eDateRange(node) {
+    const kids = childrenOf(node);
+    if (kids.length === 0) {
+      return {
+        schedStart:  node.sched_start  || '',
+        schedEnd:    node.sched_end    || '',
+        actualStart: node.actual_start || '',
+        actualEnd:   node.actual_end   || '',
+      };
+    }
+    const childRanges = kids.map(eDateRange);
+    const minD = (key) => {
+      const vs = childRanges.map(r => r[key]).filter(Boolean);
+      return vs.length ? vs.reduce((a, b) => a < b ? a : b) : '';
+    };
+    const maxD = (key) => {
+      const vs = childRanges.map(r => r[key]).filter(Boolean);
+      return vs.length ? vs.reduce((a, b) => a > b ? a : b) : '';
+    };
+    return {
+      schedStart:  minD('schedStart'),
+      schedEnd:    maxD('schedEnd'),
+      actualStart: minD('actualStart'),
+      actualEnd:   maxD('actualEnd'),
+    };
+  }
+  const eSchedStart  = n => eDateRange(n).schedStart;
+  const eSchedEnd    = n => eDateRange(n).schedEnd;
+  const eActualStart = n => eDateRange(n).actualStart;
+  const eActualEnd   = n => eDateRange(n).actualEnd;
+
+  function budgetStatus(n) {
+    const est = eEst(n), spent = eSpent(n);
+    if (!est) return null;
+    const diff = spent - est;
+    return { diff, label: diff > 0 ? 'Over budget' : diff < 0 ? 'Under budget' : 'On budget' };
+  }
+
+  // Clamp a percent input to [0, 100]; return '' for blank.
+  function clampPercent(v) {
+    if (v === '' || v == null) return '';
+    let n = parseFloat(v);
+    if (isNaN(n)) return '';
+    if (n < 0)   n = 0;
+    if (n > 100) n = 100;
+    return n;
+  }
+
+  /* ── Auto-fill helpers ── */
+  function defaultSaleFromEst(est, margin = DEFAULT_MARGIN) {
+    const e = parseFloat(est);
+    if (isNaN(e) || e <= 0) return '';
+    return +(e / (1 - margin)).toFixed(2);
+  }
+  function computeStatus(node) {
+    const today = new Date(); today.setHours(0,0,0,0);
+    const pd = parseFloat(node.percent_done);
+    if (!isNaN(pd) && pd >= 100) return 'Completed';
+    if (isNaN(pd) || pd <= 0) {
+      // Not started — check if sched_start has passed (late start)
+      if (node.sched_start && new Date(node.sched_start) < today) return 'Late Start';
+      return 'Not Started';
+    }
+    // In progress — check delay
+    if (node.sched_end && new Date(node.sched_end) < today) return 'At Risk';
+    // Otherwise: critical path if slack=0, otherwise in progress
+    return isCriticalPath(node) ? 'Critical' : 'In Progress';
+  }
+  // Cost Variance = Cost-to-Date − Estimated (uses rolled-up values for parents)
+  function computeVariance(node) {
+    const est = eEst(node), ctd = eSpent(node);
+    if (!est && !ctd) return '';
+    return (ctd - est).toFixed(2);
+  }
+  // Margin: projects use Sale − Cost (profit). Tasks/subtasks use Est − Cost ("budget left").
+  function computeMargin(node) {
+    if (typeFromId(node.id) === 'project') {
+      const sp = eSale(node), ctd = eSpent(node);
+      if (!sp && !ctd) return '';
+      return (sp - ctd).toFixed(2);
+    }
+    const est = eEst(node), ctd = eSpent(node);
+    if (!est && !ctd) return '';
+    return (est - ctd).toFixed(2);
+  }
+  function colorFor(node) {
+    return STATUS_COLORS[computeStatus(node)] || '#6b7280';
+  }
+  // Per-cell color for the Excel calendar block — runs for every (row, week)
+  function cellColorForWeek(node, weekStart, weekEnd, today) {
+    const ns = node.sched_start ? new Date(node.sched_start) : null;
+    const ne = node.sched_end   ? new Date(node.sched_end)   : null;
+    const as = node.actual_start ? new Date(node.actual_start) : null;
+    const ae = node.actual_end   ? new Date(node.actual_end)   : null;
+    const critical = isCriticalPath(node);
+
+    const overlap = (a, b, c, d) => a && b && c && d && a <= d && b >= c;
+    const inSched  = overlap(ns, ne, weekStart, weekEnd);
+    const inActual = overlap(as, ae || today, weekStart, weekEnd);
+
+    // Delay / overrun: actual work past planned end, OR scheduled overdue with work still going
+    if (ne && inActual && weekStart > ne)            return LEGEND.delay_overrun.color;
+    if (ne && inSched  && weekStart > ne)            return LEGEND.delay_overrun.color;
+
+    // Late start: schedule has begun, no actual work, not yet started
+    if (ns && weekStart >= ns && !as && (!node.percent_done || +node.percent_done === 0))
+                                                      return LEGEND.late_start.color;
+
+    if (inSched && inActual) return LEGEND.scheduled_and_actual.color;
+    if (inActual)            return LEGEND.actual_progress.color;
+    if (inSched)             return critical ? LEGEND.scheduled_critical.color
+                                             : LEGEND.scheduled_non_critical.color;
+    return null;  // no fill
+  }
+  function fmtMoney(v) {
+    const n = parseFloat(v);
+    if (isNaN(n)) return '';
+    if (Math.abs(n) >= 1000) return '$' + (n/1000).toFixed(n >= 10000 ? 0 : 1) + 'K';
+    return '$' + n.toFixed(0);
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     PERSISTENCE
+  ══════════════════════════════════════════════════════════════ */
+  function saveLocal() {
+    try {
+      localStorage.setItem(LS_KEY, JSON.stringify({NODES, SOURCE, MAX_SLACK_CAP}));
+      dirty = true;
+      const badge = document.getElementById('dirtyBadge');
+      badge.style.background = '#fef3c7';
+      badge.style.color = '#92400e';
+      badge.style.borderColor = '#fde68a';
+      badge.textContent = 'Unsaved edits';
+      badge.style.display = '';
+    } catch(e) { console.warn('localStorage save failed', e); }
+  }
+  function loadLocal() {
+    try {
+      const r = localStorage.getItem(LS_KEY);
+      if (!r) return null;
+      const parsed = JSON.parse(r);
+      if (!parsed || !Array.isArray(parsed.NODES)) return null;
+      return parsed;
+    } catch(e) { return null; }
+  }
+  function resetAll() {
+    if (dirty && !confirm('Discard local edits and reload from the source?')) return;
+    localStorage.removeItem(LS_KEY);
+    dirty = false;
+    document.getElementById('dirtyBadge').style.display = 'none';
+    location.reload();
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     ID HELPERS — enforce P / P-T / P-T-S convention
+  ══════════════════════════════════════════════════════════════ */
+  function typeFromId(id) {
+    if (!id) return 'project';
+    const parts = id.split('-');
+    if (parts.length === 1) return 'project';
+    if (parts.length === 2) return 'task';
+    return 'subtask';
+  }
+  function parentOf(id) {
+    if (!id) return null;
+    const parts = id.split('-');
+    if (parts.length <= 1) return null;
+    return parts.slice(0, -1).join('-');
+  }
+  // Suggest a new ID under a given parent. parent_id null → new project.
+  function nextId(parentId) {
+    if (!parentId) {
+      // Next P#
+      let n = 1;
+      while (NODES.some(x => x.id === 'P' + n)) n++;
+      return 'P' + n;
+    }
+    const ptype = typeFromId(parentId);
+    const prefix = ptype === 'project' ? '-T' : '-S';
+    let n = 1;
+    while (NODES.some(x => x.id === parentId + prefix + n)) n++;
+    return parentId + prefix + n;
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     TREE LAYOUT — flatten honoring collapse state
+  ══════════════════════════════════════════════════════════════ */
+  function visibleTree() {
+    const sortKey = document.getElementById('fSort').value;
+    const fStatus = document.getElementById('fStatus').value;
+
+    const byParent = {};
+    NODES.forEach(n => {
+      const p = parentOf(n.id) || '__root__';
+      (byParent[p] = byParent[p] || []).push(n);
+    });
+
+    const sortNodes = (arr) => {
+      const c = arr.slice();
+      switch (sortKey) {
+        case 'start-asc':  c.sort((a,b) => (a.sched_start||'').localeCompare(b.sched_start||'')); break;
+        case 'start-desc': c.sort((a,b) => (b.sched_start||'').localeCompare(a.sched_start||'')); break;
+        case 'end-asc':    c.sort((a,b) => (a.sched_end||'').localeCompare(b.sched_end||'')); break;
+        case 'end-desc':   c.sort((a,b) => (b.sched_end||'').localeCompare(a.sched_end||'')); break;
+        case 'id':         c.sort((a,b) => naturalCompare(a.id, b.id)); break;
+        default:           c.sort((a,b) => naturalCompare(a.id, b.id)); break;
+      }
+      return c;
+    };
+
+    // Determine root project ID for each node (climbs ancestors)
+    const projectOf = (id) => id.split('-')[0];
+
+    const out = [];
+    const walk = (parentId) => {
+      const kids = sortNodes(byParent[parentId || '__root__'] || []);
+      kids.forEach(n => {
+        const projId = projectOf(n.id);
+        // Project filter: empty set → show nothing; otherwise require membership
+        if (!selectedProjects.has(projId)) return;
+        // Status filter
+        if (fStatus && computeStatus(n) !== fStatus) { walk(n.id); return; }
+        // Owner filter: hide this row if owner doesn't match selection (keep walking children)
+        if (n.owner && !selectedOwners.has(n.owner)) { walk(n.id); return; }
+        out.push(n);
+        if (!n.collapsed) walk(n.id);
+      });
+    };
+    walk(null);
+    return out;
+  }
+  function naturalCompare(a, b) {
+    const ax = String(a||'').match(/(\d+|\D+)/g) || [];
+    const bx = String(b||'').match(/(\d+|\D+)/g) || [];
+    for (let i = 0; i < Math.min(ax.length, bx.length); i++) {
+      if (ax[i] !== bx[i]) {
+        const na = parseInt(ax[i]), nb = parseInt(bx[i]);
+        if (!isNaN(na) && !isNaN(nb)) return na - nb;
+        return ax[i].localeCompare(bx[i]);
+      }
+    }
+    return ax.length - bx.length;
+  }
+  function hasChildren(node) {
+    return NODES.some(n => parentOf(n.id) === node.id);
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     RENDER
+  ══════════════════════════════════════════════════════════════ */
+  function render() {
+    const rows = visibleTree();
+    renderStats(NODES);
+
+    if (!rows.length) {
+      document.getElementById('ganttWrap').innerHTML =
+        '<div style="text-align:center;padding:40px;color:#9ca3af;font-size:13px;">No rows yet. Click + Project to add one.</div>';
+      return;
+    }
+
+    // Date range across all rows (not just visible) so collapsed children still affect scale
+    const today = new Date(); today.setHours(0,0,0,0);
+    const dates = NODES.flatMap(n => [n.sched_start, n.sched_end, n.actual_start, n.actual_end])
+      .map(d => d ? new Date(d) : null).filter(d => d && !isNaN(d));
+    dates.push(today);
+    let lo = new Date(Math.min(...dates));
+    let hi = new Date(Math.max(...dates));
+    lo = new Date(lo.getFullYear(), lo.getMonth(), 1);
+    hi = new Date(hi.getFullYear(), hi.getMonth() + 2, 0);
+    dateRange = { lo, hi, span: hi - lo };
+
+    const pct = d => Math.max(0, Math.min(100, ((new Date(d)-lo)/dateRange.span)*100));
+    const todayP = pct(today);
+
+    // Month markers
+    const mks = [];
+    let cur = new Date(lo);
+    while (cur <= hi) {
+      mks.push({ label: `${MONTHS[cur.getMonth()]} ${cur.getFullYear()}`, p: pct(cur) });
+      cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+    }
+    const dividers = mks.map(m => `<div class="m-div" style="left:${m.p}%"></div>`).join('');
+    const todayHTML = todayP >= 0 && todayP <= 100
+      ? `<div class="today-line" style="left:${todayP}%"><span class="today-tag">Today</span></div>` : '';
+
+    let html = `<div class="gantt-header"><div class="lbl-col">PROJECT / TASK / SUBTASK</div><div class="tl-header">
+      ${mks.map(m => `<div class="month-label" style="left:${m.p}%">${m.label}</div>`).join('')}
+    </div></div>`;
+
+    rows.forEach((n, ri) => {
+      const nodeIdx = NODES.indexOf(n);
+      const level = (n.id.match(/-/g) || []).length;
+      const indent = level * 16;
+      const type = typeFromId(n.id);
+      const hasKids = hasChildren(n);
+      const critical = isCriticalPath(n);
+      const collapseBtn = hasKids
+        ? `<div class="collapse-btn" onclick="event.stopPropagation();toggleCollapse(${nodeIdx})">${n.collapsed ? '▸' : '▾'}</div>`
+        : '<div class="collapse-btn empty"></div>';
+      // Row background tint based on hierarchy + critical-path
+      const rowBg = type === 'project' ? LEGEND.project_header.color + '14'
+                  : type === 'task'    ? LEGEND.task_summary.color + '40'
+                  : critical           ? LEGEND.critical_path_row.color
+                                       : '';
+
+      // Bars: draw scheduled bar, optionally an actual bar slightly lower
+      let barsHtml = '';
+      // For parent rows the bar spans min/max of descendants; leaves use stored dates.
+      // Actuals primary, sched only as fallback.
+      const rng = eDateRange(n);
+      const useStart = rng.actualStart || rng.schedStart;
+      const useEnd   = rng.actualEnd   || rng.schedEnd;
+
+      if (useStart && useEnd) {
+        const sp = pct(useStart), ep = pct(useEnd), w = Math.max(0.5, ep - sp);
+        const color = colorFor(n);
+        const pd = Math.max(0, Math.min(100, parseFloat(n.percent_done) || 0));
+        barsHtml += `
+          <div class="g-bar is-${type[0]}" id="bar-${ri}" data-ri="${ri}" data-nodeidx="${nodeIdx}"
+               style="left:${sp}%;width:${w}%;background:${color};"
+               onmouseenter="tipShow(event,${nodeIdx})" onmouseleave="tipHide()">
+            <div class="progress-fill" style="width:${100 - pd}%; right:0; left:auto; background:rgba(255,255,255,.55);"></div>
+            <div class="rh rh-left"  onmousedown="dragStart(event,'left',${ri},${nodeIdx})"></div>
+            <span class="bar-label">${esc(n.id)} · ${esc(n.percent_done || 0)}%</span>
+            <div class="rh rh-right" onmousedown="dragStart(event,'right',${ri},${nodeIdx})"></div>
+          </div>`;
+      }
+
+      const ownerLabel = n.owner ? `👤 ${esc(n.owner)}` : '';
+      const pdLabel    = (n.percent_done != null && n.percent_done !== '') ? `${n.percent_done}% done` : '';
+      // Cost chips — Sale only on projects. Estimated Cost is the budget baseline.
+      const effEst  = eEst(n);
+      const effSpent= eSpent(n);
+      const isParent = childrenOf(n).length > 0;
+      const rollupTag = isParent ? ' <span style="font-size:8px;color:#9ca3af;">⌃</span>' : '';
+      const costBits = [];
+      if (effEst)   costBits.push(`<span title="Estimated Cost / Budget${isParent ? ' (sum of children)' : ''}">Est ${fmtMoney(effEst)}${rollupTag}</span>`);
+      if (effSpent) costBits.push(`<span title="Cost to Date${isParent ? ' (sum of children)' : ''}" style="color:#6b7280;">Spent ${fmtMoney(effSpent)}${rollupTag}</span>`);
+      if (type === 'project' && n.sale_price) {
+        costBits.push(`<span title="Sale Price" style="color:#166534;">Sale ${fmtMoney(n.sale_price)}</span>`);
+      }
+      // Over/under budget pill — appears whenever Budget is set
+      const bStat = budgetStatus(n);
+      if (bStat) {
+        const overBg   = bStat.diff > 0 ? 'background:#fef2f2;color:#b91c1c;'
+                       : bStat.diff < 0 ? 'background:#f0fdf4;color:#166534;'
+                       :                  'background:#f3f4f6;color:#374151;';
+        const lbl = bStat.diff > 0 ? '↑ Over' : bStat.diff < 0 ? '↓ Under' : '= On';
+        costBits.push(`<span title="${esc(bStat.label)} by ${fmtMoney(Math.abs(bStat.diff))}" style="${overBg}padding:1px 5px;border-radius:4px;font-weight:600;">${lbl} ${fmtMoney(Math.abs(bStat.diff))}</span>`);
+      }
+      const costsHtml = costBits.length ? `<span style="display:flex;gap:8px;flex-wrap:wrap;">${costBits.join('')}</span>` : '';
+
+      const namePrefix = critical ? '★ ' : '';
+      // Paste-target badge — shown only when this row is the current selection and clipboard has content
+      let pasteBadge = '';
+      if (CLIPBOARD && selectedNodeIdx === nodeIdx) {
+        const c = pasteTargetCheck();
+        if (c) {
+          const bg = c.ok ? '#dcfce7' : '#fee2e2';
+          const fg = c.ok ? '#166534' : '#b91c1c';
+          const icon = c.ok ? '📥' : '⚠';
+          pasteBadge = `<span style="background:${bg};color:${fg};padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;display:inline-block;margin-top:2px;">${icon} ${esc(c.msg)}</span>`;
+        }
+      }
+      const isSelectedCls = (selectedNodeIdx === nodeIdx) ? ' is-selected' : '';
+      html += `
+        <div class="gantt-row${isSelectedCls}" data-nodeidx="${nodeIdx}" ${rowBg ? `style="background:${rowBg};"` : ''}>
+          <div class="row-label"
+               draggable="true"
+               ondragstart="onRowDragStart(event, ${nodeIdx})"
+               ondragover="onRowDragOver(event, ${nodeIdx})"
+               ondrop="onRowDrop(event, ${nodeIdx})"
+               ondragend="cleanupReparentDrag()"
+               style="padding-left:${12 + indent}px;"
+               onclick="setSelected(${nodeIdx}); openEdit(${nodeIdx})">
+            ${collapseBtn}
+            <span class="row-id-badge ${type[0]}">${esc(n.id)}</span>
+            <div class="row-text">
+              <div class="row-name is-${type[0]}" title="${esc(n.name)}">${namePrefix}${esc(n.name || '(unnamed)')}</div>
+              <div class="row-meta">
+                ${ownerLabel ? `<span>${ownerLabel}</span>` : ''}
+                ${pdLabel ? `<span>${pdLabel}</span>` : ''}
+              </div>
+              ${costsHtml ? `<div class="row-meta" style="margin-top:2px;">${costsHtml}</div>` : ''}
+              ${pasteBadge ? `<div class="row-meta" style="margin-top:2px;">${pasteBadge}</div>` : ''}
+            </div>
+          </div>
+          <div class="row-timeline" id="tl-${ri}">
+            ${dividers}${todayHTML}
+            ${barsHtml}
+          </div>
+        </div>`;
+    });
+
+    document.getElementById('ganttWrap').innerHTML = html;
+
+    rows.forEach((_, ri) => {
+      const bar = document.getElementById(`bar-${ri}`);
+      if (!bar) return;
+      const nodeIdx = parseInt(bar.dataset.nodeidx);
+      // Double-click on the bar opens the edit modal (alongside right-click)
+      bar.addEventListener('dblclick', e => {
+        e.preventDefault(); e.stopPropagation();
+        if (drag) return;
+        openEdit(nodeIdx);
+      });
+      bar.addEventListener('mousedown', e => {
+        if (e.target.classList.contains('rh')) return;
+        dragStart(e, 'move', ri, nodeIdx);
+      });
+    });
+    const firstTl = document.getElementById('tl-0');
+    if (firstTl) tlRect = firstTl.getBoundingClientRect();
+  }
+
+  function renderStats(allNodes) {
+    // Filter to nodes whose root project is selected. If selectedProjects is empty,
+    // treat as "no projects selected → nothing shown" (matches the chart behavior).
+    const projTotal = NODES.filter(n => typeFromId(n.id) === 'project').length;
+    const scoped = (selectedProjects.size === 0)
+      ? []
+      : allNodes.filter(n => selectedProjects.has(n.id.split('-')[0]));
+
+    const c = { 'Not Started':0, 'In Progress':0, 'Critical':0, 'Late Start':0, 'At Risk':0, 'Completed':0 };
+    const byType = { project: 0, task: 0, subtask: 0 };
+    scoped.forEach(n => {
+      c[computeStatus(n)]++;
+      byType[typeFromId(n.id)]++;
+    });
+
+    const projectNodes = scoped.filter(n => typeFromId(n.id) === 'project');
+    const totalEst    = projectNodes.reduce((s, n) => s + eEst(n), 0);
+    const totalCost   = projectNodes.reduce((s, n) => s + eSpent(n), 0);
+    const totalSale   = projectNodes.reduce((s, n) => s + eSale(n), 0);
+
+    // Over/under budget — Estimated Cost IS the budget
+    let budgetCard;
+    if (totalEst > 0) {
+      const diff = totalCost - totalEst;
+      const fmt = fmtMoneyFull(Math.abs(diff));
+      const styleColor = diff > 0 ? '#b91c1c' : diff < 0 ? '#166534' : '#374151';
+      const label = diff > 0 ? `↑ Over ${fmt}` : diff < 0 ? `↓ Under ${fmt}` : `On budget`;
+      budgetCard = { n: `<span style="color:${styleColor}">${label}</span>`, l: 'Budget status' };
+    } else {
+      budgetCard = { n: '—', l: 'Budget status' };
+    }
+
+    const isAll = selectedProjects.size === projTotal;
+    const suffix = isAll ? '' : ` (${selectedProjects.size}/${projTotal} selected)`;
+    const filtNote = isAll ? '' : ' (filtered)';
+
+    document.getElementById('stats').innerHTML = [
+      { n: byType.project, l: 'Projects' + suffix },
+      { n: byType.task,    l: 'Tasks' },
+      { n: byType.subtask, l: 'Subtasks' },
+      { n: c['In Progress'] + c['Critical'], l: 'In Progress' },
+      { n: c['Late Start'] + c['At Risk'],   l: 'At Risk' },
+      { n: c['Completed'],                    l: 'Completed' },
+      { n: fmtMoneyFull(totalEst),    l: 'Total Est. / Budget' + filtNote },
+      { n: fmtMoneyFull(totalCost),   l: 'Total Spent' + filtNote },
+      { n: fmtMoneyFull(totalSale),   l: 'Total Sale' + filtNote },
+      budgetCard,
+    ].map(s => `<div class="stat-card"><div class="stat-number">${s.n}</div><div class="stat-label">${esc(s.l)}</div></div>`).join('');
+  }
+
+  // Full $ amount, rounded to nearest dollar with thousands separators (no K abbreviation)
+  function fmtMoneyFull(v) {
+    const n = parseFloat(v);
+    if (isNaN(n) || n === 0) return '$0';
+    return '$' + Math.round(n).toLocaleString();
+  }
+
+  function renderLegend() {
+    // Small inline legend above the chart
+    const items = Object.entries(LEGEND).map(([k, l]) =>
+      `<div class="legend-item" title="${esc(l.desc)}"><div class="legend-swatch" style="background:${l.color}"></div>${esc(l.label)}</div>`
+    ).join('');
+    document.getElementById('legend').innerHTML = items +
+      `<div class="legend-item" style="margin-left:auto;color:#9ca3af;font-size:10px;font-style:italic;">★ = critical path · right-click for edit/delete</div>`;
+
+    // Full legend & notes table below the chart
+    const body = document.getElementById('legendTableBody');
+    if (body) {
+      body.innerHTML = Object.entries(LEGEND).map(([k, l]) => `
+        <tr style="border-bottom:1px solid #f9fafb;">
+          <td style="padding:6px 8px;"><div style="width:18px; height:14px; border-radius:3px; background:${l.color}; border:1px solid rgba(0,0,0,.08);"></div></td>
+          <td style="padding:6px 8px; color:#111827; font-weight:600;">${esc(l.label)}</td>
+          <td style="padding:6px 8px; color:#4b5563;">${esc(l.desc)}</td>
+        </tr>
+      `).join('');
+    }
+
+    // Status table (matches the Filter dropdown values)
+    const sbody = document.getElementById('statusLegendTableBody');
+    if (sbody) {
+      sbody.innerHTML = Object.keys(STATUS_COLORS).map(s => `
+        <tr style="border-bottom:1px solid #f9fafb;">
+          <td style="padding:6px 8px;"><div style="width:18px; height:14px; border-radius:3px; background:${STATUS_COLORS[s]}; border:1px solid rgba(0,0,0,.08);"></div></td>
+          <td style="padding:6px 8px; color:#111827; font-weight:600;">${esc(s)}</td>
+          <td style="padding:6px 8px; color:#4b5563;">${esc(STATUS_MEANINGS[s] || '')}</td>
+        </tr>
+      `).join('');
+    }
+  }
+
+  // Multi-select filter state (Sets of values)
+  let selectedProjects = new Set();
+  let selectedOwners = new Set();
+
+  function populateFilters() {
+    const fS = document.getElementById('fStatus');
+    while (fS.options.length > 1) fS.remove(1);
+    Object.keys(STATUS_COLORS).forEach(s => fS.appendChild(new Option(s, s)));
+
+    const projIds = NODES.filter(n => typeFromId(n.id) === 'project').map(n => n.id);
+    const owners = [...new Set(NODES.map(n => n.owner).filter(Boolean))].sort();
+
+    // First-run defaults: select everything
+    if (selectedProjects.size === 0) projIds.forEach(p => selectedProjects.add(p));
+    if (selectedOwners.size === 0)   owners.forEach(o => selectedOwners.add(o));
+
+    // Drop stale entries that no longer exist (e.g., after a delete)
+    for (const p of [...selectedProjects]) if (!projIds.includes(p)) selectedProjects.delete(p);
+    for (const o of [...selectedOwners])   if (!owners.includes(o))   selectedOwners.delete(o);
+
+    updateFilterButtonLabels();
+  }
+
+  function updateFilterButtonLabels() {
+    const projTotal  = NODES.filter(n => typeFromId(n.id) === 'project').length;
+    const ownerTotal = new Set(NODES.map(n => n.owner).filter(Boolean)).size;
+    document.getElementById('projFilterBtn').textContent =
+      selectedProjects.size === projTotal ? `All projects (${projTotal}) ▾` : `${selectedProjects.size}/${projTotal} projects ▾`;
+    document.getElementById('ownerFilterBtn').textContent =
+      ownerTotal === 0 ? 'No owners' :
+      selectedOwners.size === ownerTotal ? `All owners (${ownerTotal}) ▾` : `${selectedOwners.size}/${ownerTotal} owners ▾`;
+    document.getElementById('ownerFilterBtn').style.display = ownerTotal === 0 ? 'none' : '';
+  }
+
+  function toggleFilterPopup(which) {
+    const pop = document.getElementById('filterPopup');
+    if (pop.dataset.open === which) { pop.style.display = 'none'; pop.dataset.open = ''; return; }
+
+    const items = which === 'proj'
+      ? NODES.filter(n => typeFromId(n.id) === 'project').map(n => ({ val: n.id, label: `${n.id} · ${n.name}` }))
+      : [...new Set(NODES.map(n => n.owner).filter(Boolean))].sort().map(o => ({ val: o, label: o }));
+    const sel = which === 'proj' ? selectedProjects : selectedOwners;
+
+    let html = `<div style="font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase;margin-bottom:6px;">Filter ${which === 'proj' ? 'projects' : 'owners'}</div>`;
+    html += `<div style="display:flex;gap:6px;margin-bottom:8px;"><a href="#" onclick="setFilterAll('${which}',true);return false;" style="font-size:11px;color:#1a6b2e;">Select all</a> · <a href="#" onclick="setFilterAll('${which}',false);return false;" style="font-size:11px;color:#dc2626;">Clear</a></div>`;
+    items.forEach(item => {
+      const checked = sel.has(item.val) ? 'checked' : '';
+      html += `<label class="filter-popup-item"><input type="checkbox" data-val="${esc(item.val)}" data-which="${which}" ${checked} onchange="onFilterCheck(this)"><span>${esc(item.label)}</span></label>`;
+    });
+    pop.innerHTML = html;
+
+    const btn = document.getElementById(which === 'proj' ? 'projFilterBtn' : 'ownerFilterBtn');
+    const rect = btn.getBoundingClientRect();
+    pop.style.left = rect.left + 'px';
+    pop.style.top  = (rect.bottom + 4 + window.scrollY) + 'px';
+    pop.style.display = 'block';
+    pop.dataset.open = which;
+  }
+
+  function onFilterCheck(cb) {
+    const which = cb.dataset.which;
+    const val = cb.dataset.val;
+    const sel = which === 'proj' ? selectedProjects : selectedOwners;
+    if (cb.checked) sel.add(val); else sel.delete(val);
+    updateFilterButtonLabels();
+    render();
+  }
+
+  function setFilterAll(which, on) {
+    const sel = which === 'proj' ? selectedProjects : selectedOwners;
+    sel.clear();
+    if (on) {
+      if (which === 'proj') {
+        NODES.filter(n => typeFromId(n.id) === 'project').forEach(n => sel.add(n.id));
+      } else {
+        NODES.map(n => n.owner).filter(Boolean).forEach(o => sel.add(o));
+      }
+    }
+    toggleFilterPopup(which); toggleFilterPopup(which);  // refresh popup
+    updateFilterButtonLabels();
+    render();
+  }
+
+  // Close filter popup on outside click
+  document.addEventListener('mousedown', e => {
+    const pop = document.getElementById('filterPopup');
+    if (!pop || pop.style.display === 'none') return;
+    if (pop.contains(e.target)) return;
+    if (e.target.id === 'projFilterBtn' || e.target.id === 'ownerFilterBtn') return;
+    pop.style.display = 'none'; pop.dataset.open = '';
+  });
+
+  function toggleCollapse(nodeIdx) {
+    NODES[nodeIdx].collapsed = !NODES[nodeIdx].collapsed;
+    saveLocal();
+    render();
+  }
+  function toggleCollapseAll() {
+    const anyExpanded = NODES.some(n => !n.collapsed && hasChildren(n));
+    NODES.forEach(n => { if (hasChildren(n)) n.collapsed = anyExpanded; });
+    document.getElementById('collapseAllBtn').textContent = anyExpanded ? '⊞ Expand all' : '⊟ Collapse all';
+    saveLocal();
+    render();
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     TODAY FOCUS — toggle: click once to focus, click again to restore
+  ══════════════════════════════════════════════════════════════ */
+  let todaySnapshot = null;  // saved collapse state when focus is on
+
+  function focusToday() {
+    const btn = document.getElementById('todayBtn');
+    if (todaySnapshot) {
+      // Toggle OFF — restore previous collapse state
+      NODES.forEach(n => {
+        if (n.id in todaySnapshot) n.collapsed = todaySnapshot[n.id];
+      });
+      todaySnapshot = null;
+      btn.style.background = '#dc2626';
+      btn.textContent = `🎯 Today's tasks`;
+      render();
+      return;
+    }
+
+    // Toggle ON — snapshot the current collapse state, then expand only relevant rows
+    todaySnapshot = {};
+    NODES.forEach(n => { todaySnapshot[n.id] = !!n.collapsed; });
+
+    const today = new Date(); today.setHours(0,0,0,0);
+    const current = NODES.filter(n => {
+      if (!n.sched_start || !n.sched_end) return false;
+      const s = new Date(n.sched_start), e = new Date(n.sched_end);
+      const pd = parseFloat(n.percent_done) || 0;
+      return s <= today && today <= e && pd < 100;
+    });
+
+    if (current.length === 0) {
+      alert('No tasks are currently in progress (today within their scheduled range and not 100% done).');
+      todaySnapshot = null;
+      return;
+    }
+
+    // Collapse projects without current tasks; expand those that have them (and their tasks)
+    const currentProjectIds = new Set(current.map(n => n.id.split('-')[0]));
+    const currentTaskIds = new Set(current.filter(n => typeFromId(n.id) === 'subtask').map(n => n.id.split('-').slice(0,2).join('-')));
+    NODES.forEach(n => {
+      const t = typeFromId(n.id);
+      if (t === 'project') n.collapsed = !currentProjectIds.has(n.id);
+      else if (t === 'task') n.collapsed = !currentTaskIds.has(n.id) && !current.find(c => c === n);
+    });
+    btn.style.background = '#15803d';
+    btn.textContent = `✓ Showing ${current.length} current`;
+    render();
+
+    requestAnimationFrame(() => {
+      const visible = visibleTree();
+      visible.forEach((n, ri) => {
+        if (current.find(c => c === n)) {
+          document.querySelectorAll('.gantt-row')[ri]?.classList.add('is-today-current');
+        }
+      });
+      document.querySelector('.today-line')?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    });
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     RIGHT-CLICK CONTEXT MENU
+  ══════════════════════════════════════════════════════════════ */
+  let ctxNodeIdx = -1;
+  document.addEventListener('contextmenu', e => {
+    // Look for any element with a data-nodeidx — bar OR row
+    const el = e.target.closest('[data-nodeidx]');
+    if (!el) return;
+    const nodeIdx = parseInt(el.dataset.nodeidx);
+    if (isNaN(nodeIdx) || nodeIdx < 0) return;
+    e.preventDefault();
+    ctxNodeIdx = nodeIdx;
+    setSelected(nodeIdx);
+    const menu = document.getElementById('ctxMenu');
+    menu.style.left = e.clientX + 'px';
+    menu.style.top  = e.clientY + 'px';
+    menu.style.display = 'block';
+  });
+  document.addEventListener('mousedown', e => {
+    const menu = document.getElementById('ctxMenu');
+    if (menu.style.display === 'block' && !menu.contains(e.target)) {
+      menu.style.display = 'none';
+    }
+  });
+  function ctxEdit() {
+    document.getElementById('ctxMenu').style.display = 'none';
+    if (ctxNodeIdx >= 0) openEdit(ctxNodeIdx);
+  }
+  function ctxCopy() {
+    document.getElementById('ctxMenu').style.display = 'none';
+    if (ctxNodeIdx < 0) return;
+    setSelected(ctxNodeIdx);
+    copySelected();
+  }
+  function ctxPaste() {
+    document.getElementById('ctxMenu').style.display = 'none';
+    pasteCopied();
+  }
+  function ctxDelete() {
+    document.getElementById('ctxMenu').style.display = 'none';
+    if (ctxNodeIdx < 0) return;
+    const n = NODES[ctxNodeIdx];
+    const descendants = NODES.filter(x => x.id.startsWith(n.id + '-'));
+    let msg = `Are you sure you want to delete "${n.name || n.id}"?`;
+    if (descendants.length) msg += `\n\nThis will also delete ${descendants.length} child row${descendants.length === 1 ? '' : 's'} under it.`;
+    if (!confirm(msg)) return;
+    pushHistory();
+    NODES = NODES.filter(x => x !== n && !x.id.startsWith(n.id + '-'));
+    saveLocal();
+    populateFilters();
+    render();
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     CSV EXPORT — simple, reliable, all 15 columns
+  ══════════════════════════════════════════════════════════════ */
+  function exportCSV() {
+    if (!NODES.length) { alert('Nothing to export yet.'); return; }
+    const sorted = orderForExport(NODES);
+    const csvField = v => {
+      if (v == null || v === '') return '';
+      const s = String(v);
+      return /[,"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    const lines = [FIELDS.map(f => FIELD_LABELS[f]).join(',')];
+    sorted.forEach(n => {
+      const variance = computeVariance(n);
+      const margin   = computeMargin(n);
+      const row = {
+        id: n.id, name: n.name, owner: n.owner, predecessors: n.predecessors,
+        sched_start: n.sched_start, sched_end: n.sched_end,
+        actual_start: n.actual_start, actual_end: n.actual_end,
+        slack: n.slack, percent_done: n.percent_done,
+        est_cost: n.est_cost, cost_to_date: n.cost_to_date,
+        cost_variance: variance,
+        sale_price: n.sale_price,
+        margin: margin,
+      };
+      lines.push(FIELDS.map(f => csvField(row[f])).join(','));
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${(SOURCE.title || 'gantt').toLowerCase().replace(/\s+/g,'-')}-${fmtDate(new Date())}.csv`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+
+    // Mark the current state as saved — clear the "Unsaved edits" badge
+    markSaved();
+  }
+
+  function markSaved() {
+    dirty = false;
+    const badge = document.getElementById('dirtyBadge');
+    badge.style.background = '#dcfce7';
+    badge.style.color = '#166534';
+    badge.style.borderColor = '#86efac';
+    badge.textContent = '✓ Saved ' + new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+    badge.style.display = '';
+    clearTimeout(markSaved._timer);
+    markSaved._timer = setTimeout(() => {
+      if (!dirty) badge.style.display = 'none';
+    }, 4000);
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     DRAG
+  ══════════════════════════════════════════════════════════════ */
+  function dragStart(e, type, ri, nodeIdx) {
+    e.preventDefault(); e.stopPropagation(); tipHide();
+    const n = NODES[nodeIdx];
+    const isParent = childrenOf(n).length > 0;
+    // Parents: only the 'move' gesture works — edge resize would not make sense.
+    if (isParent && type !== 'move') {
+      flashHint('Edge resize disabled on parent rows — drag a subtask to change duration.');
+      return;
+    }
+    // Determine the bar's currently visible span: rolled-up for parents, stored for leaves.
+    const range = eDateRange(n);
+    const origStart = isParent ? (range.actualStart || range.schedStart) : (n.actual_start || n.sched_start);
+    const origEnd   = isParent ? (range.actualEnd   || range.schedEnd)   : (n.actual_end   || n.sched_end);
+    if (!origStart || !origEnd) return;
+    pushHistory();
+    // For parent moves, snapshot every descendant's dates so each mousemove can apply
+    // a uniform delta — children keep their relative proportions to one another.
+    let childSnapshot = null;
+    if (isParent) {
+      const descendants = NODES.filter(x => x.id.startsWith(n.id + '-'));
+      childSnapshot = descendants.map(c => ({
+        ref: c,
+        origActualStart: c.actual_start, origActualEnd: c.actual_end,
+        origSchedStart:  c.sched_start,  origSchedEnd:  c.sched_end,
+      }));
+    }
+    drag = { type, ri, nodeIdx, startX: e.clientX, origStart, origEnd, isParent, childSnapshot };
+    const tlEl = document.getElementById(`tl-${ri}`);
+    if (tlEl) tlRect = tlEl.getBoundingClientRect();
+    const bar = document.getElementById(`bar-${ri}`);
+    if (bar) bar.classList.add('is-dragging');
+    document.getElementById('dragTip').style.display = 'block';
+  }
+  document.addEventListener('mousemove', e => {
+    if (document.getElementById('tip').style.display === 'block') {
+      document.getElementById('tip').style.left = (e.clientX + 14) + 'px';
+      document.getElementById('tip').style.top  = (e.clientY - 8)  + 'px';
+    }
+    if (!drag || !dateRange || !tlRect) return;
+    tipHide();
+    const deltaX = e.clientX - drag.startX;
+    const deltaDays = Math.round((deltaX / tlRect.width) * (dateRange.span / MS_DAY));
+    const n = NODES[drag.nodeIdx];
+    const pct = d => Math.max(0, Math.min(100, ((new Date(d) - dateRange.lo)/dateRange.span)*100));
+    const dt = document.getElementById('dragTip');
+    const dd = deltaDays >= 0 ? `+${deltaDays}d` : `${deltaDays}d`;
+
+    if (drag.isParent && drag.childSnapshot) {
+      // Apply uniform shift to every descendant's actual + sched dates
+      const shift = (iso) => iso ? fmtDate(addDays(new Date(iso), deltaDays)) : iso;
+      drag.childSnapshot.forEach(snap => {
+        snap.ref.actual_start = shift(snap.origActualStart);
+        snap.ref.actual_end   = shift(snap.origActualEnd);
+        snap.ref.sched_start  = shift(snap.origSchedStart);
+        snap.ref.sched_end    = shift(snap.origSchedEnd);
+      });
+      // Update the parent bar from new rollup
+      const range = eDateRange(n);
+      const newStart = range.actualStart || range.schedStart;
+      const newEnd   = range.actualEnd   || range.schedEnd;
+      const sp = pct(newStart), ep = pct(newEnd), w = Math.max(0.5, ep - sp);
+      const bar = document.getElementById(`bar-${drag.ri}`);
+      if (bar) { bar.style.left = sp + '%'; bar.style.width = w + '%'; }
+      dt.textContent = `${newStart} → ${newEnd} (${dd}, ${drag.childSnapshot.length} rows shift together)`;
+      dt.style.left = (e.clientX + 14) + 'px';
+      dt.style.top  = (e.clientY - 30) + 'px';
+      return;
+    }
+
+    let s = new Date(drag.origStart); let en = new Date(drag.origEnd);
+    if (drag.type === 'move')        { s = addDays(s, deltaDays); en = addDays(en, deltaDays); }
+    else if (drag.type === 'left')   { s = addDays(s, deltaDays); if (s >= en) s = addDays(en, -1); }
+    else if (drag.type === 'right')  { en = addDays(en, deltaDays); if (en <= s) en = addDays(s, 1); }
+    n.actual_start = fmtDate(s); n.actual_end = fmtDate(en);
+
+    const sp = pct(n.actual_start); const ep = pct(n.actual_end); const w = Math.max(0.5, ep - sp);
+    const bar = document.getElementById(`bar-${drag.ri}`);
+    if (bar) { bar.style.left = sp + '%'; bar.style.width = w + '%'; }
+
+    dt.textContent = drag.type === 'left'  ? `Start: ${n.actual_start} (${dd})`
+                  : drag.type === 'right' ? `End: ${n.actual_end} (${dd})`
+                  : `${n.actual_start} → ${n.actual_end} (${dd})`;
+    dt.style.left = (e.clientX + 14) + 'px';
+    dt.style.top  = (e.clientY - 30) + 'px';
+  });
+  document.addEventListener('mouseup', () => {
+    if (!drag) return;
+    const bar = document.getElementById(`bar-${drag.ri}`);
+    if (bar) bar.classList.remove('is-dragging');
+    document.getElementById('dragTip').style.display = 'none';
+    const n = NODES[drag.nodeIdx];
+    // For parent drags we mutated children — always commit on mouseup.
+    // For leaf drags only commit if the stored dates actually changed.
+    const moved = drag.isParent
+      ? (drag.childSnapshot || []).some(s => s.ref.actual_start !== s.origActualStart || s.ref.actual_end !== s.origActualEnd)
+      : (n.actual_start !== drag.origStart || n.actual_end !== drag.origEnd);
+    if (moved) {
+      // Reschedule downstream — for parent drag we may have moved many descendants, so reschedule each project that was touched.
+      const projectsTouched = new Set();
+      if (drag.isParent && drag.childSnapshot) {
+        drag.childSnapshot.forEach(s => projectsTouched.add(s.ref.id.split('-')[0]));
+      } else {
+        projectsTouched.add(n.id.split('-')[0]);
+      }
+      let totalShifted = 0, cycles = 0;
+      projectsTouched.forEach(pid => {
+        const r = runCPM(pid);
+        if (r.cycle) cycles++;
+        totalShifted += r.shifted || 0;
+      });
+      if (cycles) flashHint(`⚠ Predecessor cycle — auto-reschedule skipped`);
+      else if (totalShifted) flashHint(`↳ Auto-shifted ${totalShifted} dependent task${totalShifted===1?'':'s'}`);
+      saveLocal();
+      render();
+    }
+    drag = null;
+  });
+
+  /* ══════════════════════════════════════════════════════════════
+     MODAL
+  ══════════════════════════════════════════════════════════════ */
+  function fillModal(n) {
+    // Auto-fill actual dates from scheduled if blank (display only — saved on save)
+    const actualStart = n.actual_start || n.sched_start || '';
+    const actualEnd   = n.actual_end   || n.sched_end   || '';
+
+    document.getElementById('m-id').value           = n.id || '';
+    document.getElementById('m-type').value         = typeFromId(n.id) || 'project';
+    document.getElementById('m-name').value         = n.name || '';
+    document.getElementById('m-owner').value        = n.owner || '';
+    document.getElementById('m-predecessors').value = n.predecessors || '';
+    document.getElementById('m-sched-start').value  = n.sched_start || '';
+    document.getElementById('m-sched-end').value    = n.sched_end || '';
+    document.getElementById('m-actual-start').value = actualStart;
+    document.getElementById('m-actual-end').value   = actualEnd;
+    document.getElementById('m-slack').value        = n.slack ?? '';
+    // Note next to the Slack field if the global cap is clipping this row's value
+    {
+      const rawSlack = parseFloat(n.slack);
+      const slackInput = document.getElementById('m-slack');
+      let note = document.getElementById('m-slack-cap-note');
+      if (!note && slackInput) {
+        note = document.createElement('div');
+        note.id = 'm-slack-cap-note';
+        note.style.cssText = 'font-size:10px; color:#9ca3af; margin-top:2px;';
+        slackInput.parentNode.appendChild(note);
+      }
+      if (note) {
+        if (MAX_SLACK_CAP != null && !isNaN(rawSlack) && rawSlack > MAX_SLACK_CAP) {
+          note.textContent = `Capped to ${MAX_SLACK_CAP} day${MAX_SLACK_CAP===1?'':'s'} by global Max-slack setting`;
+          note.style.display = '';
+        } else {
+          note.style.display = 'none';
+        }
+      }
+    }
+    const pdInput = document.getElementById('m-percent-done');
+    pdInput.value = clampPercent(n.percent_done ?? '');
+    // Live-clamp on input so the user sees the value snap to range immediately
+    pdInput.oninput = () => {
+      const v = parseFloat(pdInput.value);
+      if (!isNaN(v)) {
+        if (v > 100) pdInput.value = 100;
+        if (v < 0)   pdInput.value = 0;
+      }
+    };
+
+    const idForCheck = n.id || '';
+    const rowType = typeFromId(idForCheck) || 'project';
+    const isProject = rowType === 'project';
+    const isParent = NODES.some(x => parentOf(x.id) === idForCheck && idForCheck);
+    const notice = document.getElementById('m-rollup-notice');
+    const saleSection = document.getElementById('m-sale-section');
+
+    // Sale/margin section is only relevant for projects
+    saleSection.style.display = isProject ? '' : 'none';
+
+    if (isParent) {
+      const tempNode = { ...n, id: idForCheck };
+      document.getElementById('m-est-cost').value   = eEst(tempNode).toFixed(2);
+      document.getElementById('m-cost-date').value  = eSpent(tempNode).toFixed(2);
+      // Sale Price is NOT rolled up — it stays manual on the project row
+      document.getElementById('m-sale-price').value = n.sale_price ?? '';
+      ['m-est-cost','m-cost-date'].forEach(id => {
+        const el = document.getElementById(id);
+        el.readOnly = true;
+        el.style.background = '#f9fafb';
+        el.style.color = '#6b7280';
+      });
+      // Sale Price stays editable for projects even when they have child tasks
+      const saleEl = document.getElementById('m-sale-price');
+      saleEl.readOnly = false;
+      saleEl.style.background = 'white';
+      saleEl.style.color = '#111827';
+
+      // Dates roll up from descendants — show the computed values and lock the fields
+      const range = eDateRange(tempNode);
+      document.getElementById('m-sched-start').value  = range.schedStart;
+      document.getElementById('m-sched-end').value    = range.schedEnd;
+      document.getElementById('m-actual-start').value = range.actualStart;
+      document.getElementById('m-actual-end').value   = range.actualEnd;
+      ['m-sched-start','m-sched-end','m-actual-start','m-actual-end'].forEach(id => {
+        const el = document.getElementById(id);
+        el.readOnly = true;
+        el.style.background = '#f9fafb';
+        el.style.color = '#6b7280';
+      });
+      notice.innerHTML = '⌃ This row has children — dates and costs roll up from them. Edit a subtask to change them.';
+      notice.style.display = '';
+    } else {
+      document.getElementById('m-est-cost').value   = n.est_cost ?? '';
+      document.getElementById('m-cost-date').value  = n.cost_to_date ?? '';
+      document.getElementById('m-sale-price').value = n.sale_price ?? '';
+      ['m-est-cost','m-cost-date','m-sale-price'].forEach(id => {
+        const el = document.getElementById(id);
+        el.readOnly = false;
+        el.style.background = 'white';
+        el.style.color = '#111827';
+      });
+      // Dates editable on leaves
+      ['m-sched-start','m-sched-end','m-actual-start','m-actual-end'].forEach(id => {
+        const el = document.getElementById(id);
+        el.readOnly = false;
+        el.style.background = 'white';
+        el.style.color = '#111827';
+      });
+      notice.style.display = 'none';
+    }
+
+    // Predecessors are only meaningful on subtasks (the leaves)
+    const isSubtask = rowType === 'subtask';
+    const predRow = document.getElementById('m-predecessors-row');
+    if (predRow) predRow.style.display = isSubtask ? '' : 'none';
+
+    refreshComputedFields();
+    document.getElementById('m-est-cost').oninput   = refreshComputedFields;
+    document.getElementById('m-cost-date').oninput  = refreshComputedFields;
+    document.getElementById('m-sale-price').oninput = refreshComputedFields;
+  }
+
+  function refreshComputedFields() {
+    const est = parseFloat(document.getElementById('m-est-cost').value);
+    const ctd = parseFloat(document.getElementById('m-cost-date').value);
+    const sp  = parseFloat(document.getElementById('m-sale-price').value);
+
+    // Cost Variance = Cost-to-Date − Estimated (positive = over the estimate / over budget)
+    document.getElementById('m-cost-variance').value = (isNaN(est) || isNaN(ctd)) ? '' : (ctd - est).toFixed(2);
+    // Margin: only meaningful on projects, computed consistently
+    document.getElementById('m-margin').value = (isNaN(sp) || isNaN(ctd)) ? '' : (sp - ctd).toFixed(2);
+
+    // Budget status banner — Estimated Cost IS the budget
+    const banner = document.getElementById('m-budget-status');
+    if (isNaN(est) || isNaN(ctd)) {
+      banner.style.display = 'none';
+    } else {
+      const diff = ctd - est;
+      const fmt = '$' + Math.abs(diff).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+      if (diff > 0) {
+        banner.style.cssText = 'font-size:11px; padding:6px 10px; border-radius:6px; margin-top:6px; background:#fef2f2; color:#b91c1c; border:1px solid #fecaca;';
+        banner.innerHTML = `⚠ <b>Over budget</b> by ${fmt}`;
+      } else if (diff < 0) {
+        banner.style.cssText = 'font-size:11px; padding:6px 10px; border-radius:6px; margin-top:6px; background:#f0fdf4; color:#166534; border:1px solid #bbf7d0;';
+        banner.innerHTML = `✓ <b>Under budget</b> by ${fmt}`;
+      } else {
+        banner.style.cssText = 'font-size:11px; padding:6px 10px; border-radius:6px; margin-top:6px; background:#f3f4f6; color:#374151; border:1px solid #d1d5db;';
+        banner.innerHTML = `On budget — exact match`;
+      }
+      banner.style.display = '';
+    }
+  }
+
+  function openPredecessorsPicker() {
+    const input = document.getElementById('m-predecessors');
+    const idEl = document.getElementById('m-id');
+    const currentId = (idEl.value || '').trim();
+    const myProjectId = currentId.split('-')[0];
+
+    if (!myProjectId) {
+      alert('Set the row ID first so we know which project to pull predecessors from.');
+      return;
+    }
+
+    // Candidate predecessors = all rows in the same project, excluding self
+    const candidates = NODES
+      .filter(n => n.id.split('-')[0] === myProjectId && n.id !== currentId)
+      .sort((a, b) => naturalCompare(a.id, b.id));
+
+    // Current selections parsed from the text field
+    const current = new Set(
+      (input.value || '').split(/[,;]/).map(s => s.trim()).filter(Boolean)
+    );
+
+    // Build the popup
+    const pop = document.getElementById('filterPopup');
+    let html = `<div style="font-size:11px; font-weight:700; color:#9ca3af; text-transform:uppercase; margin-bottom:6px;">Predecessors in ${esc(myProjectId)}</div>`;
+    html += `<div style="display:flex; gap:6px; margin-bottom:8px;">
+      <a href="#" onclick="setPredecessorsAll(true);return false;" style="font-size:11px; color:#1a6b2e;">Select all</a>
+      <span style="color:#d1d5db;">·</span>
+      <a href="#" onclick="setPredecessorsAll(false);return false;" style="font-size:11px; color:#dc2626;">Clear</a>
+      <span style="flex:1;"></span>
+      <a href="#" onclick="closePredecessorsPicker();return false;" style="font-size:11px; color:#374151;">Done</a>
+    </div>`;
+    if (!candidates.length) {
+      html += `<div style="font-size:11px; color:#9ca3af;">No other rows in this project yet.</div>`;
+    } else {
+      candidates.forEach(n => {
+        const checked = current.has(n.id) ? 'checked' : '';
+        const indent = (n.id.match(/-/g) || []).length * 12;
+        const type = typeFromId(n.id);
+        const badge = type === 'project' ? '🟢' : type === 'task' ? '🔵' : '🟣';
+        html += `<label class="filter-popup-item" style="padding-left:${indent + 4}px;">
+          <input type="checkbox" data-id="${esc(n.id)}" ${checked} onchange="onPredecessorCheck()">
+          <span>${badge} <b>${esc(n.id)}</b> — ${esc(n.name || '(unnamed)')}</span>
+        </label>`;
+      });
+    }
+    pop.innerHTML = html;
+
+    // Position it next to the modal's predecessors field
+    const rect = input.getBoundingClientRect();
+    pop.style.left = rect.left + 'px';
+    pop.style.top  = (rect.bottom + 4 + window.scrollY) + 'px';
+    pop.style.minWidth = Math.max(300, rect.width + 80) + 'px';
+    pop.style.zIndex = '10500';   // above the modal (z=10000)
+    pop.style.display = 'block';
+    pop.dataset.open = 'preds';
+  }
+
+  function onPredecessorCheck() {
+    const input = document.getElementById('m-predecessors');
+    const checked = [...document.querySelectorAll('#filterPopup input[type="checkbox"]')]
+      .filter(cb => cb.checked)
+      .map(cb => cb.dataset.id);
+    input.value = checked.join(', ');
+  }
+
+  function setPredecessorsAll(on) {
+    document.querySelectorAll('#filterPopup input[type="checkbox"]').forEach(cb => {
+      cb.checked = on;
+    });
+    onPredecessorCheck();
+  }
+
+  function closePredecessorsPicker() {
+    const pop = document.getElementById('filterPopup');
+    pop.style.display = 'none';
+    pop.dataset.open = '';
+    pop.style.zIndex = '9000';
+  }
+
+  // recalcSaleFromMargin removed — Sale Price is now entered manually for projects.
+
+  function openEdit(nodeIdx) {
+    if (drag) return;
+    modalIdx = nodeIdx;
+    document.getElementById('modalTitle').textContent = 'Edit ' + (typeFromId(NODES[nodeIdx].id) || 'row');
+    document.getElementById('m-parent-row').style.display = 'none';  // editing → ID is fixed
+    fillModal(NODES[nodeIdx]);
+    document.getElementById('modalDelBtn').style.display = '';
+    document.getElementById('modal').style.display = 'flex';
+  }
+
+  function openAdd(type) {
+    modalIdx = -1;
+    const parentRow    = document.getElementById('m-parent-row');
+    const parentSelect = document.getElementById('m-parent');
+    let suggestedId;
+
+    if (type === 'project') {
+      suggestedId = nextId(null);
+      parentRow.style.display = 'none';
+    } else if (type === 'task') {
+      const allProjects = NODES.filter(n => typeFromId(n.id) === 'project');
+      if (!allProjects.length) {
+        alert("You need to create a Project first — Tasks live under a Project. Click \"+ Project\" before adding a Task.");
+        return;
+      }
+      const projects = allProjects.filter(n => selectedProjects.has(n.id));
+      if (!projects.length) {
+        alert('No projects are currently checked in the "Projects ▾" filter. Open the filter and tick at least one project to add a Task to it.');
+        return;
+      }
+      parentRow.style.display = '';
+      parentSelect.innerHTML = projects.map(p =>
+        `<option value="${esc(p.id)}">${esc(p.id)} — ${esc(p.name)}</option>`
+      ).join('');
+      parentSelect.value = projects[0].id;
+      suggestedId = nextId(parentSelect.value);
+      parentSelect.onchange = () => {
+        document.getElementById('m-id').value = nextId(parentSelect.value);
+      };
+    } else {
+      const allTasks = NODES.filter(n => typeFromId(n.id) === 'task');
+      if (!allTasks.length) {
+        alert("You need to create a Task first — Subtasks live under a Task. Click \"+ Task\" before adding a Subtask.");
+        return;
+      }
+      const tasks = allTasks.filter(n => selectedProjects.has(n.id.split('-')[0]));
+      if (!tasks.length) {
+        alert('Tasks exist, but none of them belong to a project that\'s currently checked in the "Projects ▾" filter. Tick the right project first.');
+        return;
+      }
+      parentRow.style.display = '';
+      parentSelect.innerHTML = tasks.map(t => {
+        const proj = NODES.find(n => n.id === t.id.split('-')[0]);
+        const projName = proj ? proj.name : '';
+        return `<option value="${esc(t.id)}">${esc(t.id)} — ${esc(t.name)}${projName ? ` · in ${esc(projName)}` : ''}</option>`;
+      }).join('');
+      parentSelect.value = tasks[0].id;
+      suggestedId = nextId(parentSelect.value);
+      parentSelect.onchange = () => {
+        document.getElementById('m-id').value = nextId(parentSelect.value);
+      };
+    }
+
+    const today = fmtDate(new Date());
+    const monthLater = fmtDate(addDays(new Date(), 30));
+    document.getElementById('modalTitle').textContent = 'Add ' + type;
+    fillModal({
+      id: suggestedId, type, name: '', owner: '', predecessors: '',
+      sched_start: today, sched_end: monthLater,
+      actual_start: today, actual_end: monthLater,
+      slack: '', percent_done: 0,
+      est_cost: '', cost_to_date: '', sale_price: '',
+    });
+    document.getElementById('modalDelBtn').style.display = 'none';
+    document.getElementById('modal').style.display = 'flex';
+    setTimeout(() => document.getElementById('m-name').focus(), 50);
+  }
+
+  function saveModal() {
+    const id    = document.getElementById('m-id').value.trim();
+    const name  = document.getElementById('m-name').value.trim();
+    const sched_start = document.getElementById('m-sched-start').value;
+    const sched_end   = document.getElementById('m-sched-end').value;
+    if (!id)   { alert('ID is required (e.g. P1, P1-T1, P1-T1-S1)'); return; }
+    if (!name) { alert('Name is required.'); return; }
+    if (sched_start && sched_end && sched_start > sched_end) {
+      alert('Sched. Start must be on or before Sched. End.'); return;
+    }
+
+    // Auto-fill actual dates from scheduled if user left them blank
+    const actualStart = document.getElementById('m-actual-start').value || sched_start;
+    const actualEnd   = document.getElementById('m-actual-end').value   || sched_end;
+
+    // Build the node from form values. Parent rows (with children) have read-only
+    // cost fields whose values are computed roll-ups — don't persist those.
+    const isParent = NODES.some(x => parentOf(x.id) === id);
+    const rowType = typeFromId(id);
+    const node = {
+      id, type: rowType,
+      name,
+      owner:        document.getElementById('m-owner').value.trim(),
+      predecessors: rowType === 'subtask' ? document.getElementById('m-predecessors').value.trim() : '',
+      sched_start,  sched_end,
+      actual_start: actualStart,
+      actual_end:   actualEnd,
+      slack:        document.getElementById('m-slack').value,
+      // Cap % Done to [0, 100] — user can type anything in the input
+      percent_done: clampPercent(document.getElementById('m-percent-done').value),
+      // For parent rows: Est / Cost roll up from children — don't persist their values
+      est_cost:     isParent ? '' : document.getElementById('m-est-cost').value,
+      cost_to_date: isParent ? '' : document.getElementById('m-cost-date').value,
+      // Sale Price lives only on the project row; keep what's typed (manual entry, no roll-up)
+      sale_price:   typeFromId(id) === 'project' ? document.getElementById('m-sale-price').value : '',
+      collapsed:    modalIdx >= 0 ? NODES[modalIdx].collapsed : false,
+    };
+
+    // Detect ID collisions
+    const conflictIdx = NODES.findIndex((n, i) => n.id === id && i !== modalIdx);
+    if (conflictIdx >= 0) {
+      if (!confirm(`ID "${id}" already exists. Replace it?`)) return;
+      NODES.splice(conflictIdx, 1);
+    }
+
+    pushHistory();   // undoable
+    const prevNode = (modalIdx >= 0) ? {...NODES[modalIdx]} : null;
+    if (modalIdx === -1) NODES.push(node);
+    else                 NODES[modalIdx] = node;
+
+    // Make sure the new row is actually visible after save:
+    // its root project must be in the project filter, and its owner (if any)
+    // must be in the owner filter. Otherwise visibleTree would silently drop it.
+    const projId = id.split('-')[0];
+    selectedProjects.add(projId);
+    if (node.owner) selectedOwners.add(node.owner);
+
+    // Auto-reschedule descendants if dates OR predecessors changed
+    const reshuffleTriggers = !prevNode
+      || prevNode.actual_start !== node.actual_start
+      || prevNode.actual_end   !== node.actual_end
+      || prevNode.sched_start  !== node.sched_start
+      || prevNode.sched_end    !== node.sched_end
+      || prevNode.predecessors !== node.predecessors;
+    if (reshuffleTriggers) {
+      const r = autoReschedule(node.id);
+      if (r.cycle) flashHint('⚠ Cycle in predecessors — auto-reschedule skipped');
+      else if (r.shifted.length) flashHint(`↳ Auto-shifted ${r.shifted.length} dependent task${r.shifted.length===1?'':'s'}`);
+    }
+
+    saveLocal();
+    populateFilters();
+    closeModal();
+    render();
+  }
+
+  function deleteFromModal() {
+    if (modalIdx < 0) return;
+    const n = NODES[modalIdx];
+    const descendants = NODES.filter(x => x.id.startsWith(n.id + '-'));
+    let msg = `Delete "${n.name || n.id}"?`;
+    if (descendants.length) msg += `\n\nThis will also delete ${descendants.length} child row(s).`;
+    if (!confirm(msg)) return;
+    pushHistory();
+    NODES = NODES.filter(x => x !== n && !x.id.startsWith(n.id + '-'));
+    saveLocal();
+    populateFilters();
+    closeModal();
+    render();
+  }
+
+  function closeModal() {
+    document.getElementById('modal').style.display = 'none';
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     TOOLTIP
+  ══════════════════════════════════════════════════════════════ */
+  const tipEl = document.getElementById('tip');
+  function tipShow(e, nodeIdx) {
+    if (drag) return;
+    const n = NODES[nodeIdx]; if (!n) return;
+    const status = computeStatus(n);
+    const variance = computeVariance(n), margin = computeMargin(n);
+    let html = `<div class="tip-title">${esc(n.id)} · ${esc(n.name)}</div>`;
+    if (n.owner)         html += `<div class="tip-row"><b>Owner:</b> ${esc(n.owner)}</div>`;
+    if (n.predecessors)  html += `<div class="tip-row"><b>Predecessors:</b> ${esc(n.predecessors)}</div>`;
+                          html += `<div class="tip-row"><b>Sched:</b> ${esc(n.sched_start||'?')} → ${esc(n.sched_end||'?')}</div>`;
+    if (n.actual_start || n.actual_end)
+                          html += `<div class="tip-row"><b>Actual:</b> ${esc(n.actual_start||'—')} → ${esc(n.actual_end||'—')}</div>`;
+    // Show effective slack — clamped to the global Max-slack cap if set
+    {
+      const raw = parseFloat(n.slack);
+      const eff = eSlack(n);
+      if (!isNaN(raw) || isFinite(eff)) {
+        const showVal = isFinite(eff) ? eff : raw;
+        const capped = (MAX_SLACK_CAP != null && !isNaN(raw) && raw > MAX_SLACK_CAP);
+        html += `<div class="tip-row"><b>Slack:</b> ${esc(showVal)} day${showVal === 1 ? '' : 's'}${capped ? ` <span style="color:#9ca3af;font-size:10px;">(raw ${esc(raw)}, capped to ${esc(MAX_SLACK_CAP)})</span>` : ''}</div>`;
+      }
+    }
+                          html += `<div class="tip-row"><b>% Done:</b> ${esc(n.percent_done || 0)}% · <b style="color:${STATUS_COLORS[status]}">${esc(status)}</b></div>`;
+    if (n.est_cost)      html += `<div class="tip-row"><b>Est. Cost:</b> $${esc(n.est_cost)}</div>`;
+    if (n.cost_to_date)  html += `<div class="tip-row"><b>Cost-to-Date:</b> $${esc(n.cost_to_date)}</div>`;
+    if (variance !== '') html += `<div class="tip-row"><b>Variance:</b> $${esc(variance)}</div>`;
+    if (n.sale_price)    html += `<div class="tip-row"><b>Sale Price:</b> $${esc(n.sale_price)}</div>`;
+    if (margin !== '')   html += `<div class="tip-row"><b>Margin:</b> $${esc(margin)}</div>`;
+                          html += `<div style="margin-top:5px;color:#9ca3af;font-size:10px;">Drag bar · Drag edges to resize · Click label to edit</div>`;
+    tipEl.innerHTML = html;
+    tipEl.style.display = 'block';
+  }
+  function tipHide() { tipEl.style.display = 'none'; }
+
+  /* ══════════════════════════════════════════════════════════════
+     DATE HELPERS
+  ══════════════════════════════════════════════════════════════ */
+  function addDays(d, n) { const r = new Date(d); r.setDate(r.getDate() + n); return r; }
+  function fmtDate(d) {
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+  function esc(s) {
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     CSV / XLSX IMPORT (re-uses logic from previous template)
+  ══════════════════════════════════════════════════════════════ */
+  const dropOverlay = document.getElementById('dropOverlay');
+  ['dragenter','dragover'].forEach(evt => {
+    document.body.addEventListener(evt, e => {
+      if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); dropOverlay.classList.add('active'); }
+    });
+  });
+  ['dragleave','dragend'].forEach(evt => {
+    document.body.addEventListener(evt, e => {
+      if (e.target === document.body || e.target === dropOverlay) dropOverlay.classList.remove('active');
+    });
+  });
+  document.body.addEventListener('drop', async e => {
+    e.preventDefault();
+    dropOverlay.classList.remove('active');
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    alert('Import on drop: send this file back to Claude and re-run the gantt-chart skill to map columns into the new schema.');
+  });
+
+  /* ══════════════════════════════════════════════════════════════
+     EXPORT — build a fresh XLSX with data + calendar visualization
+  ══════════════════════════════════════════════════════════════ */
+  async function exportXLSX() {
+    if (!NODES.length) { alert('Nothing to export yet.'); return; }
+    try {
+      const blob = await buildFreshXLSX(NODES);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${(SOURCE.title || 'gantt').toLowerCase().replace(/\s+/g,'-')}-${fmtDate(new Date())}.xlsx`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    } catch (err) {
+      alert('Could not build Excel: ' + err.message);
+      console.error(err);
+    }
+  }
+
+  async function buildFreshXLSX(nodes) {
+    // ── Date range for calendar columns ──
+    const dates = nodes.flatMap(n => [n.sched_start, n.sched_end, n.actual_start, n.actual_end])
+      .map(d => d ? new Date(d) : null).filter(d => d && !isNaN(d));
+    if (!dates.length) {
+      const today = new Date();
+      dates.push(today, addDays(today, 30));
+    }
+    let calLo = new Date(Math.min(...dates));
+    let calHi = new Date(Math.max(...dates));
+    calLo = new Date(calLo.getFullYear(), calLo.getMonth(), 1);
+    calHi = new Date(calHi.getFullYear(), calHi.getMonth() + 1, 0);
+
+    // Generate weekly buckets — each bucket = one calendar column
+    const weeks = [];  // [{start: Date, end: Date, weekNum, monthLabel}]
+    {
+      let cur = new Date(calLo);
+      // align to nearest Monday
+      cur.setDate(cur.getDate() - ((cur.getDay() + 6) % 7));
+      while (cur <= calHi) {
+        const wEnd = addDays(cur, 6);
+        weeks.push({
+          start: new Date(cur),
+          end: wEnd,
+          monthLabel: `${MONTHS[cur.getMonth()]} ${cur.getFullYear()}`,
+        });
+        cur = addDays(cur, 7);
+      }
+    }
+
+    // ── Build matrix ──
+    // Row 1: blank/title
+    // Row 2: month headers (merged across weeks of same month) — for the calendar block
+    // Row 3: data headers (15 fields) + week-start labels for each calendar column
+    // Row 4+: data rows
+    const N_DATA_COLS = FIELDS.length;        // 15
+
+    // Sort nodes in tree order for export
+    const exportRows = orderForExport(nodes);
+
+    // ── Build XML pieces ──
+    // Styles: header bold, status color fills, date format, money format
+    const styles = buildStylesXML();
+    const ssMap = new Map();
+    const ssList = [];
+    function ssIndex(s) {
+      if (ssMap.has(s)) return ssMap.get(s);
+      const i = ssList.length;
+      ssMap.set(s, i); ssList.push(s);
+      return i;
+    }
+
+    let sheetXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">` +
+      `<cols>`;
+    // Column widths
+    sheetXml += `<col min="1" max="1" width="10" customWidth="1"/>`;
+    sheetXml += `<col min="2" max="2" width="38" customWidth="1"/>`;
+    sheetXml += `<col min="3" max="3" width="16" customWidth="1"/>`;
+    sheetXml += `<col min="4" max="4" width="14" customWidth="1"/>`;
+    sheetXml += `<col min="5" max="8" width="12" customWidth="1"/>`;
+    sheetXml += `<col min="9" max="10" width="10" customWidth="1"/>`;
+    sheetXml += `<col min="11" max="15" width="14" customWidth="1"/>`;
+    sheetXml += `<col min="${N_DATA_COLS + 1}" max="${N_DATA_COLS + weeks.length}" width="6" customWidth="1"/>`;
+    sheetXml += `</cols><sheetData>`;
+
+    // ── Row 1: Title ──
+    sheetXml += `<row r="1" ht="22" customHeight="1">`;
+    sheetXml += `<c r="A1" s="6" t="s"><v>${ssIndex(SOURCE.title || 'Project Gantt')}</v></c>`;
+    sheetXml += `</row>`;
+
+    // ── Row 2: month header for calendar block ──
+    sheetXml += `<row r="2" ht="18" customHeight="1">`;
+    // Empty cells across data columns
+    weeks.forEach((wk, i) => {
+      const col = colLetter(N_DATA_COLS + i);
+      sheetXml += `<c r="${col}2" s="7" t="s"><v>${ssIndex(wk.monthLabel)}</v></c>`;
+    });
+    sheetXml += `</row>`;
+
+    // ── Row 3: data headers + week-start labels ──
+    sheetXml += `<row r="3" ht="32" customHeight="1">`;
+    FIELDS.forEach((f, i) => {
+      sheetXml += `<c r="${colLetter(i)}3" s="1" t="s"><v>${ssIndex(FIELD_LABELS[f])}</v></c>`;
+    });
+    weeks.forEach((wk, i) => {
+      const col = colLetter(N_DATA_COLS + i);
+      sheetXml += `<c r="${col}3" s="8" t="s"><v>${ssIndex(fmtDate(wk.start).slice(5))}</v></c>`;
+    });
+    sheetXml += `</row>`;
+
+    // ── Data rows (start at row 4) ──
+    exportRows.forEach((n, idx) => {
+      const rowNum = 4 + idx;
+      const type = typeFromId(n.id);
+      const level = (n.id.match(/-/g) || []).length;
+      const indentPrefix = '  '.repeat(level);
+      const status = computeStatus(n);
+      const statusColor = STATUS_COLORS[status];
+      const rowStyle = type === 'project' ? 2 : type === 'task' ? 3 : 4; // bold/regular based on type
+
+      sheetXml += `<row r="${rowNum}" ht="18" customHeight="1">`;
+
+      // A: ID
+      sheetXml += cellStr(`A${rowNum}`, n.id, rowStyle, ssIndex);
+      // B: Name (with indent prefix)
+      sheetXml += cellStr(`B${rowNum}`, indentPrefix + (n.name || ''), rowStyle, ssIndex);
+      // C: Owner
+      sheetXml += cellStr(`C${rowNum}`, n.owner || '', rowStyle, ssIndex);
+      // D: Predecessors
+      sheetXml += cellStr(`D${rowNum}`, n.predecessors || '', rowStyle, ssIndex);
+      // E-H: Dates
+      sheetXml += cellDate(`E${rowNum}`, n.sched_start);
+      sheetXml += cellDate(`F${rowNum}`, n.sched_end);
+      sheetXml += cellDate(`G${rowNum}`, n.actual_start);
+      sheetXml += cellDate(`H${rowNum}`, n.actual_end);
+      // I: Slack
+      sheetXml += cellNum(`I${rowNum}`, n.slack);
+      // J: % Done (write as 0-1 with percent format)
+      const pd = parseFloat(n.percent_done);
+      if (!isNaN(pd)) sheetXml += `<c r="J${rowNum}" s="9"><v>${pd / 100}</v></c>`;
+      // K-O: Money
+      sheetXml += cellMoney(`K${rowNum}`, n.est_cost);
+      sheetXml += cellMoney(`L${rowNum}`, n.cost_to_date);
+      // Cost Variance = Cost-to-Date − Estimated  (positive = over budget)
+      sheetXml += `<c r="M${rowNum}" s="10"><f>L${rowNum}-K${rowNum}</f></c>`;
+      sheetXml += cellMoney(`N${rowNum}`, n.sale_price);
+      // Margin = Sale Price − Cost-to-Date
+      sheetXml += `<c r="O${rowNum}" s="10"><f>N${rowNum}-L${rowNum}</f></c>`;
+
+      // Calendar bars: per-week color logic from the legend spec
+      const today = new Date(); today.setHours(0,0,0,0);
+      weeks.forEach((wk, wi) => {
+        const color = cellColorForWeek(n, wk.start, wk.end, today);
+        if (color) {
+          const col = colLetter(N_DATA_COLS + wi);
+          sheetXml += `<c r="${col}${rowNum}" s="${styleForColor(color)}"/>`;
+        }
+      });
+      sheetXml += `</row>`;
+    });
+
+    sheetXml += `</sheetData>`;
+
+    // Merge month headers (row 2) for consecutive cells with same month label
+    sheetXml += `<mergeCells>`;
+    let mergeCount = 0;
+    let i = 0;
+    while (i < weeks.length) {
+      let j = i;
+      while (j + 1 < weeks.length && weeks[j+1].monthLabel === weeks[i].monthLabel) j++;
+      if (j > i) {
+        const c1 = colLetter(N_DATA_COLS + i);
+        const c2 = colLetter(N_DATA_COLS + j);
+        sheetXml += `<mergeCell ref="${c1}2:${c2}2"/>`;
+        mergeCount++;
+      }
+      i = j + 1;
+    }
+    // Merge title row across data cols + first few weeks
+    const titleEndCol = colLetter(Math.min(N_DATA_COLS + Math.min(weeks.length, 6) - 1, N_DATA_COLS + weeks.length - 1));
+    sheetXml += `<mergeCell ref="A1:${titleEndCol}1"/>`;
+    mergeCount++;
+    sheetXml += `</mergeCells>`;
+
+    // Freeze panes: freeze first 3 rows + first 2 columns (ID + Name)
+    sheetXml += `<sheetViews><sheetView tabSelected="1" workbookViewId="0"><pane xSplit="2" ySplit="3" topLeftCell="C4" activePane="bottomRight" state="frozen"/></sheetView></sheetViews>`;
+
+    sheetXml += `</worksheet>`;
+
+    // Shared strings
+    let ssXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="${ssList.length}" uniqueCount="${ssList.length}">`;
+    ssList.forEach(s => { ssXml += `<si><t xml:space="preserve">${xmlEsc(s)}</t></si>`; });
+    ssXml += `</sst>`;
+
+    // Workbook + rels + content types
+    const wbXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">` +
+      `<sheets><sheet name="Gantt Chart" sheetId="1" r:id="rId1"/></sheets></workbook>`;
+    const wbRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+      `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>` +
+      `<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>` +
+      `<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>` +
+      `</Relationships>`;
+    const ctXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
+      `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>` +
+      `<Default Extension="xml" ContentType="application/xml"/>` +
+      `<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>` +
+      `<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>` +
+      `<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>` +
+      `<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>` +
+      `</Types>`;
+    const rootRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+      `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>` +
+      `</Relationships>`;
+
+    const files = {
+      '[Content_Types].xml': ctXml,
+      '_rels/.rels': rootRels,
+      'xl/_rels/workbook.xml.rels': wbRels,
+      'xl/workbook.xml': wbXml,
+      'xl/sharedStrings.xml': ssXml,
+      'xl/styles.xml': styles,
+      'xl/worksheets/sheet1.xml': sheetXml,
+    };
+
+    return await buildZip(files);
+  }
+
+  // Order nodes for export: depth-first by hierarchy, sorted by ID at each level
+  function orderForExport(nodes) {
+    const byParent = {};
+    nodes.forEach(n => {
+      const p = parentOf(n.id) || '__root__';
+      (byParent[p] = byParent[p] || []).push(n);
+    });
+    const out = [];
+    const walk = (parentId) => {
+      const kids = (byParent[parentId || '__root__'] || []).slice().sort((a,b) => naturalCompare(a.id, b.id));
+      kids.forEach(k => { out.push(k); walk(k.id); });
+    };
+    walk(null);
+    return out;
+  }
+
+  // Cell helpers — return XML strings
+  function cellStr(ref, val, styleIdx, ssIndex) {
+    if (!val) return `<c r="${ref}" s="${styleIdx}"/>`;
+    return `<c r="${ref}" s="${styleIdx}" t="s"><v>${ssIndex(String(val))}</v></c>`;
+  }
+  function cellDate(ref, iso) {
+    if (!iso) return `<c r="${ref}" s="5"/>`;
+    return `<c r="${ref}" s="5"><v>${isoToExcelSerial(iso)}</v></c>`;
+  }
+  function cellNum(ref, val) {
+    const n = parseFloat(val);
+    if (isNaN(n)) return `<c r="${ref}"/>`;
+    return `<c r="${ref}"><v>${n}</v></c>`;
+  }
+  function cellMoney(ref, val) {
+    const n = parseFloat(val);
+    if (isNaN(n)) return `<c r="${ref}" s="10"/>`;
+    return `<c r="${ref}" s="10"><v>${n}</v></c>`;
+  }
+
+  // Build a styles.xml with all styles we reference by index:
+  // 0=default, 1=header (bold + fill), 2=project row (bold), 3=task row (semibold),
+  // 4=subtask row, 5=date, 6=title, 7=month header, 8=week header,
+  // 9=percent, 10=money
+  // 11+ = status color fills (one per unique color)
+  let _colorStyleMap = {};  // hexColor → styleIdx
+  let _colorStyleCount = 11;
+  function styleForColor(hex) {
+    if (_colorStyleMap[hex] !== undefined) return _colorStyleMap[hex];
+    const idx = _colorStyleCount++;
+    _colorStyleMap[hex] = idx;
+    return idx;
+  }
+  function buildStylesXML() {
+    _colorStyleMap = {}; _colorStyleCount = 11;
+    // Pre-register all status colors so they have stable indices
+    const colorList = Object.values(STATUS_COLORS);
+    colorList.forEach(c => styleForColor(c));
+
+    // Fonts
+    let fonts = `<fonts count="3">`
+      + `<font><sz val="11"/><name val="Calibri"/></font>`
+      + `<font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>`
+      + `<font><b/><sz val="11"/><name val="Calibri"/></font>`
+      + `</fonts>`;
+
+    // Fills — index 0 (default), 1 (gray125), 2 (header dark green), 3-N (status colors)
+    let fillsXml = `<fill><patternFill patternType="none"/></fill>`;
+    fillsXml += `<fill><patternFill patternType="gray125"/></fill>`;
+    fillsXml += `<fill><patternFill patternType="solid"><fgColor rgb="FF1A6B2E"/><bgColor indexed="64"/></patternFill></fill>`;
+    fillsXml += `<fill><patternFill patternType="solid"><fgColor rgb="FFDCFCE7"/><bgColor indexed="64"/></patternFill></fill>`;  // project row tint
+    fillsXml += `<fill><patternFill patternType="solid"><fgColor rgb="FFEFF6FF"/><bgColor indexed="64"/></patternFill></fill>`;  // task row tint
+    fillsXml += `<fill><patternFill patternType="solid"><fgColor rgb="FF1F4E78"/><bgColor indexed="64"/></patternFill></fill>`;  // title bg
+    fillsXml += `<fill><patternFill patternType="solid"><fgColor rgb="FFE5E7EB"/><bgColor indexed="64"/></patternFill></fill>`;  // month header
+    // status color fills start at index 7
+    colorList.forEach(c => {
+      const rgb = c.replace('#','').toUpperCase();
+      fillsXml += `<fill><patternFill patternType="solid"><fgColor rgb="FF${rgb}"/><bgColor indexed="64"/></patternFill></fill>`;
+    });
+    const fills = `<fills count="${7 + colorList.length}">${fillsXml}</fills>`;
+
+    // Borders
+    const borders = `<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>`;
+
+    // numFmts: 165=dd-mmm-yy, 166=$#,##0.00, 167=0%
+    const numFmts = `<numFmts count="3">`
+      + `<numFmt numFmtId="165" formatCode="dd\\-mmm\\-yy"/>`
+      + `<numFmt numFmtId="166" formatCode="&quot;$&quot;#,##0.00"/>`
+      + `<numFmt numFmtId="167" formatCode="0%"/>`
+      + `</numFmts>`;
+
+    // cellXfs — each xf references font/fill/border/numFmt
+    // Status fill indices in <fills>: 7, 8, 9, 10 (one per STATUS_COLORS in order)
+    let cellXfs = `<cellXfs count="${11 + colorList.length}">`;
+    // 0: default
+    cellXfs += `<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>`;
+    // 1: header (bold, white, dark green fill)
+    cellXfs += `<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>`;
+    // 2: project row (bold + green tint)
+    cellXfs += `<xf numFmtId="0" fontId="2" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1"/>`;
+    // 3: task row (bold + blue tint)
+    cellXfs += `<xf numFmtId="0" fontId="2" fillId="4" borderId="0" xfId="0" applyFont="1" applyFill="1"/>`;
+    // 4: subtask row (default)
+    cellXfs += `<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>`;
+    // 5: date
+    cellXfs += `<xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>`;
+    // 6: title (white bold on dark green)
+    cellXfs += `<xf numFmtId="0" fontId="1" fillId="5" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>`;
+    // 7: month header (bold, gray fill, centered)
+    cellXfs += `<xf numFmtId="0" fontId="2" fillId="6" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>`;
+    // 8: week header (small, centered)
+    cellXfs += `<xf numFmtId="0" fontId="0" fillId="6" borderId="0" xfId="0" applyFill="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>`;
+    // 9: percent
+    cellXfs += `<xf numFmtId="167" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>`;
+    // 10: money
+    cellXfs += `<xf numFmtId="166" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>`;
+    // 11-N: status color fills
+    colorList.forEach((c, i) => {
+      cellXfs += `<xf numFmtId="0" fontId="0" fillId="${7 + i}" borderId="0" xfId="0" applyFill="1"/>`;
+    });
+    cellXfs += `</cellXfs>`;
+
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">` +
+      numFmts + fonts + fills + borders +
+      `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>` +
+      cellXfs +
+      `<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>` +
+      `<dxfs count="0"/><tableStyles count="0"/>` +
+      `</styleSheet>`;
+  }
+
+  function colLetter(idx) {
+    let s = ''; idx += 1;
+    while (idx > 0) { const m = (idx - 1) % 26; s = String.fromCharCode(65 + m) + s; idx = Math.floor((idx - 1) / 26); }
+    return s;
+  }
+  function xmlEsc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');
+  }
+  function isoToExcelSerial(iso) {
+    const [y, m, d] = iso.split('-').map(Number);
+    const target = Date.UTC(y, m - 1, d);
+    const base   = Date.UTC(1899, 11, 30);
+    return Math.round((target - base) / MS_DAY);
+  }
+
+  /* ── ZIP builder (deflate-raw) ── */
+  const CRC_TABLE = (() => {
+    const t = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+      let c = i;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+      t[i] = c;
+    }
+    return t;
+  })();
+  function crc32(bytes) {
+    let c = 0xFFFFFFFF;
+    for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0;
+  }
+  async function deflateRaw(bytes) {
+    if (typeof CompressionStream === 'undefined') return { compressed: bytes, method: 0 };
+    const cs = new CompressionStream('deflate-raw');
+    const w = cs.writable.getWriter(); w.write(bytes); w.close();
+    const r = cs.readable.getReader();
+    const chunks = []; let total = 0;
+    while (true) {
+      const { value, done } = await r.read();
+      if (done) break;
+      chunks.push(value); total += value.length;
+    }
+    const out = new Uint8Array(total); let off = 0;
+    for (const c of chunks) { out.set(c, off); off += c.length; }
+    return { compressed: out, method: 8 };
+  }
+  async function buildZip(filesObj) {
+    const enc = new TextEncoder();
+    const chunks = []; const entries = []; let offset = 0;
+    for (const [name, content] of Object.entries(filesObj)) {
+      const nameBytes = enc.encode(name);
+      const dataBytes = enc.encode(content);
+      const crc = crc32(dataBytes);
+      const { compressed, method } = await deflateRaw(dataBytes);
+      const localHeader = new Uint8Array(30);
+      const dv = new DataView(localHeader.buffer);
+      dv.setUint32(0, 0x04034b50, true);
+      dv.setUint16(4, 20, true); dv.setUint16(6, 0, true);
+      dv.setUint16(8, method, true); dv.setUint16(10, 0, true); dv.setUint16(12, 0, true);
+      dv.setUint32(14, crc, true);
+      dv.setUint32(18, compressed.length, true);
+      dv.setUint32(22, dataBytes.length, true);
+      dv.setUint16(26, nameBytes.length, true); dv.setUint16(28, 0, true);
+      chunks.push(localHeader, nameBytes, compressed);
+      entries.push({ name: nameBytes, crc, method, compressedSize: compressed.length, uncompressedSize: dataBytes.length, offset });
+      offset += 30 + nameBytes.length + compressed.length;
+    }
+    const cdStart = offset;
+    for (const e of entries) {
+      const cd = new Uint8Array(46);
+      const dv = new DataView(cd.buffer);
+      dv.setUint32(0, 0x02014b50, true);
+      dv.setUint16(4, 20, true); dv.setUint16(6, 20, true);
+      dv.setUint16(8, 0, true); dv.setUint16(10, e.method, true);
+      dv.setUint16(12, 0, true); dv.setUint16(14, 0, true);
+      dv.setUint32(16, e.crc, true);
+      dv.setUint32(20, e.compressedSize, true);
+      dv.setUint32(24, e.uncompressedSize, true);
+      dv.setUint16(28, e.name.length, true);
+      dv.setUint16(30, 0, true); dv.setUint16(32, 0, true);
+      dv.setUint16(34, 0, true); dv.setUint16(36, 0, true);
+      dv.setUint32(38, 0, true);
+      dv.setUint32(42, e.offset, true);
+      chunks.push(cd, e.name);
+      offset += 46 + e.name.length;
+    }
+    const cdSize = offset - cdStart;
+    const eocd = new Uint8Array(22);
+    const dv = new DataView(eocd.buffer);
+    dv.setUint32(0, 0x06054b50, true);
+    dv.setUint16(4, 0, true); dv.setUint16(6, 0, true);
+    dv.setUint16(8, entries.length, true); dv.setUint16(10, entries.length, true);
+    dv.setUint32(12, cdSize, true); dv.setUint32(16, cdStart, true);
+    dv.setUint16(20, 0, true);
+    chunks.push(eocd);
+    return new Blob(chunks, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     PNG / PDF — render the visible tree to canvas
+  ══════════════════════════════════════════════════════════════ */
+  async function exportPNG() { const c = await renderChartCanvas(); if (c) downloadCanvas(c, 'png'); }
+  async function exportPDF() {
+    const c = await renderChartCanvas();
+    if (!c) return;
+    c.toBlob(async blob => {
+      if (!blob) return;
+      const jpegBytes = new Uint8Array(await blob.arrayBuffer());
+      const pdf = buildPDFWithImage(jpegBytes, c.width, c.height);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(pdf);
+      a.download = `${(SOURCE.title || 'gantt').toLowerCase().replace(/\s+/g,'-')}-${fmtDate(new Date())}.pdf`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    }, 'image/jpeg', 0.92);
+  }
+  function downloadCanvas(c, fmt) {
+    const a = document.createElement('a');
+    a.download = `${(SOURCE.title || 'gantt').toLowerCase().replace(/\s+/g,'-')}-${fmtDate(new Date())}.${fmt}`;
+    a.href = c.toDataURL('image/' + fmt);
+    a.click();
+  }
+
+  async function renderChartCanvas() {
+    const rows = visibleTree();
+    if (!rows.length || !dateRange) { alert('Nothing to render yet.'); return null; }
+    const LBL_W = 280, ROW_H = 44, HDR_H = 50, PAD_T = 80, PAD_L = 20, PAD_R = 20, PAD_B = 60, TL_W = 1000;
+    const W = PAD_L + LBL_W + TL_W + PAD_R;
+    const H = PAD_T + HDR_H + rows.length * ROW_H + PAD_B;
+    const canvas = document.createElement('canvas');
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    const pct = d => Math.max(0, Math.min(1, ((new Date(d)-dateRange.lo)/dateRange.span)));
+
+    const logo = await loadLogo();
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,W,H);
+    if (logo) ctx.drawImage(logo, PAD_L, 12, 200, 56);
+    ctx.fillStyle = '#111827'; ctx.font = 'bold 16px -apple-system'; ctx.textAlign='left';
+    ctx.fillText(SOURCE.title || 'Project Gantt', PAD_L + 220, 34);
+    ctx.fillStyle = '#9ca3af'; ctx.font = '11px -apple-system';
+    ctx.fillText('Generated ' + new Date().toLocaleDateString(), PAD_L + 220, 50);
+
+    const tX = PAD_L + LBL_W;
+    const today = new Date(); today.setHours(0,0,0,0);
+
+    // Month markers
+    const months = [];
+    let cur = new Date(dateRange.lo);
+    while (cur <= dateRange.hi) {
+      months.push({ label: `${MONTHS[cur.getMonth()]} ${cur.getFullYear()}`, p: pct(cur) });
+      cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+    }
+    ctx.fillStyle = '#f9fafb'; ctx.fillRect(tX, PAD_T, TL_W, HDR_H);
+    ctx.fillStyle = '#9ca3af'; ctx.font = 'bold 10px -apple-system'; ctx.textAlign='center';
+    months.forEach(m => {
+      const x = tX + m.p * TL_W;
+      ctx.fillText(m.label, x, PAD_T + 20);
+      ctx.fillStyle = '#e5e7eb'; ctx.fillRect(x, PAD_T, 1, HDR_H + rows.length * ROW_H);
+      ctx.fillStyle = '#9ca3af';
+    });
+    ctx.textAlign='left'; ctx.fillStyle='#6b7280'; ctx.font='bold 10px -apple-system';
+    ctx.fillText('PROJECT / TASK / SUBTASK', PAD_L + 12, PAD_T + 20);
+    ctx.fillStyle = '#e5e7eb'; ctx.fillRect(PAD_L + LBL_W - 1, PAD_T, 1, HDR_H + rows.length * ROW_H);
+
+    rows.forEach((n, ri) => {
+      const ry = PAD_T + HDR_H + ri * ROW_H;
+      ctx.fillStyle = ri % 2 === 0 ? '#ffffff' : '#fafafa';
+      ctx.fillRect(PAD_L, ry, W - PAD_L - PAD_R, ROW_H);
+      ctx.fillStyle = '#f3f4f6'; ctx.fillRect(PAD_L, ry + ROW_H - 1, W - PAD_L - PAD_R, 1);
+
+      const level = (n.id.match(/-/g) || []).length;
+      const indent = level * 14;
+      const type = typeFromId(n.id);
+      const xStart = PAD_L + 10 + indent;
+
+      // Draw the ID and measure its width, so the name never overlaps
+      ctx.font = `bold 11px -apple-system`; ctx.fillStyle = '#111827'; ctx.textAlign='left';
+      const idLabel = n.id;
+      ctx.fillText(idLabel, xStart, ry + 16);
+      const idWidth = ctx.measureText(idLabel).width;
+
+      // Name follows after ID with 10px gap; truncate if too long for remaining space
+      const nameX = xStart + idWidth + 10;
+      const availName = LBL_W - (nameX - PAD_L) - 8;
+      ctx.font = (type === 'project' ? 'bold' : 'normal') + ' 11px -apple-system';
+      let nm = (n.name || '');
+      // Measure and truncate
+      while (nm.length > 0 && ctx.measureText(nm).width > availName) {
+        nm = nm.slice(0, -1);
+      }
+      if (nm.length < (n.name || '').length) nm = nm.slice(0, -1) + '…';
+      ctx.fillText(nm, nameX, ry + 16);
+
+      // Meta line — owner + % + costs
+      ctx.fillStyle = '#9ca3af'; ctx.font = '10px -apple-system';
+      const metaParts = [];
+      if (n.owner) metaParts.push(n.owner);
+      if (n.percent_done != null && n.percent_done !== '') metaParts.push(`${n.percent_done}%`);
+      if (n.est_cost) metaParts.push(`Est ${fmtMoney(n.est_cost)}`);
+      if (n.cost_to_date) metaParts.push(`Spent ${fmtMoney(n.cost_to_date)}`);
+      if (n.sale_price) metaParts.push(`Sale ${fmtMoney(n.sale_price)}`);
+      ctx.fillText(metaParts.join(' · '), xStart, ry + 30);
+
+      // Bar
+      if (n.sched_start && n.sched_end) {
+        const sp = pct(n.sched_start); const ep = pct(n.sched_end);
+        const bx = tX + sp * TL_W; const bw = Math.max(4, (ep - sp) * TL_W);
+        const color = colorFor(n);
+        ctx.fillStyle = color;
+        roundRect(ctx, bx, ry + 12, bw, 20, 3);
+        // Progress overlay
+        const pd = Math.max(0, Math.min(100, parseFloat(n.percent_done) || 0));
+        if (pd > 0 && pd < 100) {
+          ctx.fillStyle = 'rgba(0,0,0,.18)';
+          roundRect(ctx, bx + (bw * pd / 100), ry + 12, bw * (100 - pd) / 100, 20, 0);
+        }
+        ctx.fillStyle = 'white'; ctx.font = 'bold 10px -apple-system'; ctx.textAlign='left';
+        if (bw > 60) ctx.fillText(`${n.id} · ${n.percent_done || 0}%`, bx + 5, ry + 26);
+      }
+    });
+
+    // Today line
+    const todayX = tX + pct(today) * TL_W;
+    if (pct(today) >= 0 && pct(today) <= 1) {
+      ctx.fillStyle = '#ef4444'; ctx.fillRect(todayX, PAD_T, 2, HDR_H + rows.length * ROW_H);
+      ctx.fillStyle = '#ef4444'; ctx.font = 'bold 9px -apple-system'; ctx.textAlign='left';
+      ctx.fillText('Today', todayX + 4, PAD_T + HDR_H - 8);
+    }
+
+    // Footer
+    if (logo) {
+      const fLogoW = 130, fLogoH = 38;
+      ctx.drawImage(logo, (W - fLogoW) / 2 - 50, H - PAD_B + 8, fLogoW, fLogoH);
+      ctx.fillStyle = '#9ca3af'; ctx.font = '10px -apple-system'; ctx.textAlign='left';
+      ctx.fillText('© 2026 RenewTech Energy', (W - fLogoW) / 2 + fLogoW - 50 + 12, H - PAD_B + 32);
+    }
+    return canvas;
+  }
+
+  function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x+r, y);
+    ctx.lineTo(x+w-r, y); ctx.arcTo(x+w, y, x+w, y+r, r);
+    ctx.lineTo(x+w, y+h-r); ctx.arcTo(x+w, y+h, x+w-r, y+h, r);
+    ctx.lineTo(x+r, y+h); ctx.arcTo(x, y+h, x, y+h-r, r);
+    ctx.lineTo(x, y+r); ctx.arcTo(x, y, x+r, y, r);
+    ctx.closePath(); ctx.fill();
+  }
+  function loadLogo() {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 90"><circle cx="43" cy="38" r="28" fill="none" stroke="#1a6b2e" stroke-width="2.5"/><ellipse cx="43" cy="38" rx="28" ry="10" fill="none" stroke="#1a6b2e" stroke-width="1.6"/><ellipse cx="43" cy="38" rx="28" ry="19" fill="none" stroke="#1a6b2e" stroke-width="1.2"/><line x1="43" y1="10" x2="43" y2="66" stroke="#1a6b2e" stroke-width="1.6"/><ellipse cx="43" cy="38" rx="10" ry="28" fill="none" stroke="#1a6b2e" stroke-width="1.2"/><ellipse cx="43" cy="38" rx="19" ry="28" fill="none" stroke="#1a6b2e" stroke-width="1"/><path d="M52,14 C72,14 80,30 72,52 C64,62 50,66 38,60 C50,55 65,44 68,30 C60,36 48,46 38,54 C36,44 40,24 52,14Z" fill="#6dc03c"/><path d="M16,58 C10,48 10,28 22,18" fill="none" stroke="#1a6b2e" stroke-width="5" stroke-linecap="round"/><text x="82" y="34" font-family="'Segoe UI',Arial,sans-serif" font-size="28" font-weight="800" fill="#1a6b2e">Renew</text><text x="192" y="34" font-family="'Segoe UI',Arial,sans-serif" font-size="28" font-weight="800" fill="#6dc03c">Tech</text><line x1="82" y1="56" x2="100" y2="56" stroke="#6dc03c" stroke-width="2.5"/><text x="106" y="62" font-family="'Segoe UI',Arial,sans-serif" font-size="15" font-weight="700" letter-spacing="3" fill="#1a6b2e">ENERGY</text><line x1="222" y1="56" x2="242" y2="56" stroke="#6dc03c" stroke-width="2.5"/></svg>`;
+    return new Promise(resolve => {
+      const img = new Image();
+      const blob = new Blob([svg], { type: 'image/svg+xml' });
+      const url = URL.createObjectURL(blob);
+      img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+      img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+      img.src = url;
+    });
+  }
+
+  function buildPDFWithImage(jpegBytes, imgW, imgH) {
+    const pageW = 842, pageH = 595, margin = 24;
+    const scale = Math.min((pageW - 2*margin) / imgW, (pageH - 2*margin) / imgH);
+    const drawW = imgW * scale, drawH = imgH * scale;
+    const drawX = (pageW - drawW)/2, drawY = (pageH - drawH)/2;
+    const enc = new TextEncoder();
+    const parts = []; const offsets = []; let bytePos = 0;
+    const push = s => { const b = (typeof s === 'string') ? enc.encode(s) : s; parts.push(b); bytePos += b.length; };
+    const obj = () => { offsets.push(bytePos); };
+    push('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n');
+    obj(); push('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
+    obj(); push('2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n');
+    obj(); push(`3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageW} ${pageH}] /Resources << /XObject << /Im1 4 0 R >> /ProcSet [/PDF /ImageC] >> /Contents 5 0 R >>\nendobj\n`);
+    obj(); push(`4 0 obj\n<< /Type /XObject /Subtype /Image /Width ${imgW} /Height ${imgH} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpegBytes.length} >>\nstream\n`);
+    push(jpegBytes); push('\nendstream\nendobj\n');
+    const content = `q ${drawW.toFixed(2)} 0 0 ${drawH.toFixed(2)} ${drawX.toFixed(2)} ${drawY.toFixed(2)} cm /Im1 Do Q`;
+    obj(); push(`5 0 obj\n<< /Length ${content.length} >>\nstream\n${content}\nendstream\nendobj\n`);
+    const xrefStart = bytePos;
+    push(`xref\n0 6\n0000000000 65535 f \n`);
+    offsets.forEach(o => push(o.toString().padStart(10, '0') + ' 00000 n \n'));
+    push(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`);
+    return new Blob(parts, { type: 'application/pdf' });
+  }
+  </script>
+</body>
+</html>
