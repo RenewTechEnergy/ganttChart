@@ -557,10 +557,13 @@
         </p>
       </div>
 
+      <!-- Read-only banner — shown when the current user can't edit this row's project. -->
+      <div id="m-readonly-banner" style="display:none; margin-top:10px; padding:8px 12px; border-radius:6px; background:#fef3c7; color:#92400e; border:1px solid #fde68a; font-size:11px;"></div>
+
       <div class="modal-actions">
         <button class="btn btn-del" id="modalDelBtn" onclick="deleteFromModal()">🗑 Delete</button>
         <button class="btn btn-cancel" onclick="closeModal()">Cancel</button>
-        <button class="btn btn-ok" onclick="saveModal()">Save</button>
+        <button class="btn btn-ok" id="modalSaveBtn" onclick="saveModal()">Save</button>
       </div>
     </div>
   </div>
@@ -3421,6 +3424,11 @@ Phase                                Dur (d)   Predecessor
     document.getElementById('ctxMenu').style.display = 'none';
     if (ctxNodeIdx < 0) return;
     const n = NODES[ctxNodeIdx];
+    const projectId = n.id.split('-')[0];
+    if (!canEditProject(projectId)) {
+      flashHint(`🔒 You don't have edit access to project ${projectId}`);
+      return;
+    }
     const descendants = NODES.filter(x => x.id.startsWith(n.id + '-'));
     let msg = `Are you sure you want to delete "${n.name || n.id}"?`;
     if (descendants.length) msg += `\n\nThis will also delete ${descendants.length} child row${descendants.length === 1 ? '' : 's'} under it.`;
@@ -3661,6 +3669,13 @@ Phase                                Dur (d)   Predecessor
   function dragStart(e, type, ri, nodeIdx) {
     e.preventDefault(); e.stopPropagation(); tipHide();
     const n = NODES[nodeIdx];
+    // Block drag entirely on rows the user can't edit — RLS would reject the
+    // save anyway, no point letting them move the bar visually.
+    const projectId = n.id.split('-')[0];
+    if (!canEditProject(projectId)) {
+      flashHint(`🔒 Read-only — you can't edit project ${projectId}`);
+      return;
+    }
     const isParent = childrenOf(n).length > 0;
     // Parents: only the 'move' gesture works — edge resize would not make sense.
     if (isParent && type !== 'move') {
@@ -3964,6 +3979,47 @@ Phase                                Dur (d)   Predecessor
     document.getElementById('m-est-cost').oninput   = refreshComputedFields;
     document.getElementById('m-cost-date').oninput  = refreshComputedFields;
     document.getElementById('m-sale-price').oninput = refreshComputedFields;
+
+    // ── Edit gate ──
+    // For existing rows (modalIdx >= 0): if the user can't edit this row's
+    // project, show a read-only banner and disable Save + Delete. New rows
+    // (modalIdx === -1) are always editable — RLS may still reject on save,
+    // but optimistically allow.
+    {
+      const saveBtn  = document.getElementById('modalSaveBtn');
+      const delBtn   = document.getElementById('modalDelBtn');
+      const banner   = document.getElementById('m-readonly-banner');
+      const lock = (locked, msg) => {
+        if (banner) {
+          banner.style.display = locked ? '' : 'none';
+          banner.textContent   = locked ? msg : '';
+        }
+        if (saveBtn) {
+          saveBtn.disabled = locked;
+          saveBtn.style.opacity = locked ? '0.4' : '';
+          saveBtn.style.pointerEvents = locked ? 'none' : '';
+        }
+        if (delBtn) {
+          delBtn.disabled = locked;
+          delBtn.style.opacity = locked ? '0.4' : '';
+          delBtn.style.pointerEvents = locked ? 'none' : '';
+        }
+      };
+      if (modalIdx < 0) {
+        lock(false);                        // creating new row — always allowed
+      } else {
+        const projectId = (n.id || '').split('-')[0];
+        if (!canEditProject(projectId)) {
+          const role = window.Supa?.currentRole?.();
+          const why  = role === 'viewer'
+            ? 'You have the viewer role — every project is read-only.'
+            : `You don't have edit access to project ${projectId}. Ask its owner to share it with you (Editor) to make changes.`;
+          lock(true, '🔒 Read-only — ' + why);
+        } else {
+          lock(false);
+        }
+      }
+    }
   }
 
   // ── Sharing UI handlers ──
@@ -4284,6 +4340,18 @@ Phase                                Dur (d)   Predecessor
     document.getElementById('modal').style.display = 'flex';
   }
 
+  // True if the current user can add to / edit rows under this project.
+  //   admin  → always
+  //   viewer → never
+  //   user   → only if project owned or has an edit-share (== in __editableProjectIds)
+  function canEditProject(projectId) {
+    const role = window.Supa?.currentRole?.();
+    if (role === 'admin') return true;
+    if (role === 'viewer') return false;
+    const set = window.__editableProjectIds;
+    return !!set && set.has(projectId);
+  }
+
   function openAdd(type) {
     modalIdx = -1;
     const parentRow    = document.getElementById('m-parent-row');
@@ -4291,6 +4359,8 @@ Phase                                Dur (d)   Predecessor
     let suggestedId;
 
     if (type === 'project') {
+      // Anyone non-viewer can create a fresh project. The CSS `.readonly`
+      // rules already disable the + Project button for viewers.
       suggestedId = nextId(null);
       parentRow.style.display = 'none';
     } else if (type === 'task') {
@@ -4299,9 +4369,11 @@ Phase                                Dur (d)   Predecessor
         alert("You need to create a Project first — Tasks live under a Project. Click \"+ Project\" before adding a Task.");
         return;
       }
-      const projects = allProjects.filter(n => selectedProjects.has(n.id));
+      // Only show projects the user actually has edit access to. Ignore the
+      // Mine/Projects ▾ filter here — those affect display only, not capability.
+      const projects = allProjects.filter(n => canEditProject(n.id));
       if (!projects.length) {
-        alert('No projects are currently checked in the "Projects ▾" filter. Open the filter and tick at least one project to add a Task to it.');
+        alert("You don't have edit access to any project. Click + Project to create one of your own first.");
         return;
       }
       parentRow.style.display = '';
@@ -4319,9 +4391,10 @@ Phase                                Dur (d)   Predecessor
         alert("You need to create a Task first — Subtasks live under a Task. Click \"+ Task\" before adding a Subtask.");
         return;
       }
-      const tasks = allTasks.filter(n => selectedProjects.has(n.id.split('-')[0]));
+      // Only tasks whose project the user can edit.
+      const tasks = allTasks.filter(t => canEditProject(t.id.split('-')[0]));
       if (!tasks.length) {
-        alert('Tasks exist, but none of them belong to a project that\'s currently checked in the "Projects ▾" filter. Tick the right project first.');
+        alert("You don't have edit access to any task. Add a task under one of your own projects first.");
         return;
       }
       parentRow.style.display = '';
@@ -4361,6 +4434,20 @@ Phase                                Dur (d)   Predecessor
     if (!name) { alert('Name is required.'); return; }
     if (sched_start && sched_end && sched_start > sched_end) {
       alert('Sched. Start must be on or before Sched. End.'); return;
+    }
+
+    // Permission gate: existing rows in projects the user can't edit are rejected
+    // client-side. New rows (modalIdx === -1) under a new top-level project are
+    // always allowed; new task/subtask rows must be in an editable project.
+    const isExisting = modalIdx >= 0;
+    const projectIdForCheck = id.split('-')[0];
+    if (isExisting && !canEditProject(projectIdForCheck)) {
+      alert(`Read-only: you don't have edit access to project ${projectIdForCheck}.`);
+      return;
+    }
+    if (!isExisting && typeFromId(id) !== 'project' && !canEditProject(projectIdForCheck)) {
+      alert(`You don't have edit access to project ${projectIdForCheck}. Pick a project you own (or that's shared with you).`);
+      return;
     }
 
     // Auto-fill actual dates from scheduled if user left them blank
@@ -4416,6 +4503,16 @@ Phase                                Dur (d)   Predecessor
     const projId = id.split('-')[0];
     selectedProjects.add(projId);
     if (node.owner) selectedOwners.add(node.owner);
+    // If this is a brand-new project, optimistically mark it editable — the
+    // audit trigger will set owner_user_id = auth.uid() on insert, so the
+    // current user is the owner. Refresh from the server shortly after to
+    // converge with the canonical set.
+    if (modalIdx === -1 && rowType === 'project' && window.__editableProjectIds) {
+      window.__editableProjectIds.add(projId);
+      if (window.Supa?.refreshEditableProjects) {
+        setTimeout(() => window.Supa.refreshEditableProjects(), 1500);
+      }
+    }
 
     // Auto-reschedule descendants if dates OR predecessors changed
     const reshuffleTriggers = !prevNode
@@ -4847,11 +4944,24 @@ Phase                                Dur (d)   Predecessor
     }
     if (skipped) console.warn(`[import] skipped ${skipped} row(s) whose ids already exist`);
 
-    // Select newly imported projects in the filter so they're visible.
-    result.nodes.forEach(n => { if (n.type === 'project') selectedProjects.add(n.id); });
+    // Select newly imported projects in the filter so they're visible. Also
+    // mark them optimistically as editable — the current user just created
+    // them, so the audit trigger will set owner_user_id = auth.uid() on insert.
+    // We refresh from the server afterwards to converge with the real state.
+    result.nodes.forEach(n => {
+      if (n.type === 'project') {
+        selectedProjects.add(n.id);
+        if (window.__editableProjectIds) window.__editableProjectIds.add(n.id);
+      }
+    });
 
     saveLocal(); populateFilters(); render();
     flashHint(`📥 Imported ${result.nodes.length} row${result.nodes.length === 1 ? '' : 's'} from ${file.name}`);
+    // After Supabase upserts settle, pull the authoritative editable set so the
+    // Mine filter shows every newly-created project (not just the last one).
+    if (window.Supa?.refreshEditableProjects) {
+      setTimeout(() => window.Supa.refreshEditableProjects(), 1500);
+    }
   });
 
   /* ══════════════════════════════════════════════════════════════
