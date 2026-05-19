@@ -51,6 +51,14 @@
     .btn-pdf:hover { background: #0284c7; }
     .btn-xlsx { background: #16a34a; color: white; }
     .btn-xlsx:hover { background: #15803d; }
+    .btn-save { background: #16a34a; color: white; font-weight: 700; }
+    .btn-save:hover { background: #15803d; }
+    .btn-save.is-dirty { background: #f59e0b; }
+    .btn-save.is-dirty:hover { background: #d97706; }
+    .btn-save.is-syncing { background: #6b7280; cursor: progress; }
+    .btn-mine { background: #0e7490; color: white; }
+    .btn-mine:hover { background: #155e75; }
+    .btn-mine.is-active { background: #155e75; box-shadow: inset 0 0 0 2px white, 0 0 0 2px #0e7490; }
     .btn-ok { background: #1a6b2e; color: white; }
     .btn-ok:hover { background: #155725; }
     .btn-cancel { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; }
@@ -154,9 +162,82 @@
       .toolbar, .legend, .modal-overlay, .tip, .drag-tip, .dirty-badge, .rh, .drop-overlay, #filterPopup, #ctxMenu { display: none !important; }
       .gantt-wrap { border: 1px solid #ccc; }
     }
+
+    /* ── Supabase auth bar + role-aware readonly mode ── */
+    #auth-bar { position: fixed; top: 0; left: 0; right: 0; background: #1a1a2e; color: white;
+      padding: 8px 14px; font-size: 12px; display: flex; align-items: center; gap: 10px; z-index: 1000; }
+    #auth-bar strong { font-size: 13px; }
+    #auth-bar input { padding: 4px 8px; border-radius: 4px; border: none; font-size: 12px; min-width: 200px; }
+    #auth-bar button { padding: 4px 10px; border-radius: 4px; border: none; font-size: 12px;
+      cursor: pointer; background: #2563eb; color: white; font-weight: 600; }
+    #auth-bar button:hover { background: #1d4ed8; }
+    #auth-bar .spacer { flex: 1; }
+    #auth-bar .role-badge { font-size: 10px; padding: 2px 6px; border-radius: 3px;
+      background: #4b5563; text-transform: uppercase; letter-spacing: 0.5px; }
+    #auth-bar .role-badge.admin  { background: #16a34a; }
+    #auth-bar .role-badge.member { background: #2563eb; }
+    #auth-bar .role-badge.viewer { background: #6b7280; }
+    body.with-authbar { padding-top: 56px; }
+    /* Pre-login: hide everything that's not the auth bar (and the page header /
+       footer logos). Auth bar stays so the user has somewhere to sign in. */
+    body.signed-out h1,
+    body.signed-out .sub,
+    body.signed-out #stats,
+    body.signed-out .toolbar,
+    body.signed-out .legend,
+    body.signed-out .drop-wrap,
+    body.signed-out #sourceLabel,
+    body.signed-out #filterPopup,
+    body.signed-out #notesPanel,
+    body.signed-out .footer-bar { display: none !important; }
+    body.signed-out .signed-out-hint { display: block; }
+    .signed-out-hint { display: none; max-width: 480px; margin: 80px auto; padding: 24px 28px; text-align: center; color: #6b7280; background: white; border: 1px solid #e5e7eb; border-radius: 12px; font-size: 14px; line-height: 1.6; }
+    .signed-out-hint h2 { font-size: 16px; color: #111827; margin-bottom: 8px; }
+    body.readonly .btn-add-p,
+    body.readonly .btn-add-t,
+    body.readonly .btn-add-s,
+    body.readonly .btn-reset,
+    body.readonly .btn-save { pointer-events: none; opacity: 0.4; }
+    body.readonly .bar { cursor: default !important; }
   </style>
 </head>
-<body>
+<body class="signed-out">
+
+  <!-- Supabase auth banner — rendered by the supabase module below.
+       Three states: not-signed-in (email entry), awaiting-code (OTP input), signed-in. -->
+  <div id="auth-bar">
+    <strong>Project Gantt</strong>
+    <span id="auth-status">checking…</span>
+    <span id="auth-role" class="role-badge" style="display:none;"></span>
+    <span class="spacer"></span>
+
+    <!-- State A: Not signed in -->
+    <span id="auth-signin">
+      <input id="auth-email" type="email" placeholder="you@company.com" />
+      <button onclick="Supa.signIn(document.getElementById('auth-email').value)">Send code</button>
+    </span>
+
+    <!-- State B: Code sent, awaiting 6-digit verification -->
+    <span id="auth-awaiting" style="display:none;">
+      <span id="auth-awaiting-email" style="opacity:0.7;"></span>
+      <input id="auth-code" type="text" inputmode="numeric" maxlength="10" placeholder="code"
+             style="width:140px; letter-spacing:3px; text-align:center; font-family:monospace;" />
+      <button onclick="Supa.verifyCode(document.getElementById('auth-code').value)">Verify</button>
+      <button onclick="Supa.cancelCode()" style="background:#6b7280;">Cancel</button>
+    </span>
+
+    <!-- State C: Signed in -->
+    <span id="auth-signedin" style="display:none;">
+      <span id="auth-email-display"></span>
+      <button onclick="Supa.signOut()">Sign out</button>
+    </span>
+  </div>
+
+  <!-- Shown only when body.signed-out is set (i.e., no session). -->
+  <div class="signed-out-hint">
+    <h2>🔒 Sign in to view the board</h2>
+    <p>Enter your email above and we'll send you a 6-digit code. Once you're signed in your projects will load here.</p>
+  </div>
 
   <!-- RenewTech header logo -->
   <div style="margin-bottom:14px;" id="logoHeader">
@@ -185,6 +266,10 @@
   <div id="stats" class="stats"></div>
 
   <div class="toolbar">
+    <input type="text" id="projSearch" placeholder="🔎 search projects…"
+           style="width:180px; font-size:12px; padding:5px 9px;"
+           oninput="onProjectSearchInput()"
+           title="Filter visible rows by project / task / subtask name or ID">
     <button class="btn btn-collapse" id="projFilterBtn" onclick="toggleFilterPopup('proj')" title="Filter projects">Projects ▾</button>
     <button class="btn btn-collapse" id="ownerFilterBtn" onclick="toggleFilterPopup('owner')" title="Filter owners">Owners ▾</button>
     <select id="fStatus" onchange="render()"><option value="">All Statuses</option></select>
@@ -208,8 +293,11 @@
     <div class="spacer"></div>
     <button class="btn btn-pdf"  onclick="exportPDF()" title="Download as PDF">🖨 PDF</button>
     <button class="btn btn-png"  onclick="exportPNG()" title="Download as PNG">🖼 PNG</button>
-    <button class="btn btn-xlsx" onclick="exportCSV()" title="Save as CSV — reload by running the skill on this file">💾 Save (CSV)</button>
-    <button class="btn btn-reset" onclick="resetAll()" title="Discard local edits">↺ Reset</button>
+    <button class="btn btn-save" id="saveBtn" onclick="manualCloudSave()" title="Push edits to Supabase now">💾 Save</button>
+    <button class="btn btn-mine" id="mineBtn" onclick="toggleMineFilter()" title="Show only projects you can edit">👤 Mine</button>
+    <button class="btn btn-users" id="usersBtn" onclick="openManageUsersModal()" title="Assign admin / user / viewer roles" style="display:none; background:#7c3aed; color:white;">⚙ Users</button>
+    <button class="btn btn-xlsx" onclick="exportCSV()" title="Download a CSV snapshot">📄 Export CSV</button>
+    <button class="btn btn-reset" onclick="clearGantt()" title="Wipe every row from the chart (and from the cloud if signed in)">🗑 Clear</button>
     <button class="btn" style="background:#7c3aed;color:white;" onclick="recalcAll()" title="Force CPM rebuild — snap tasks behind their predecessors and recompute critical path/slack">🔄 Recalc</button>
     <button class="btn btn-add-p" onclick="openAdd('project')">+ Project</button>
     <button class="btn btn-add-t" onclick="openAdd('task')">+ Task</button>
@@ -241,7 +329,7 @@
   <p class="source-label" id="sourceLabel" style="margin-top:14px;"></p>
 
   <!-- Legend & Notes panel — appears above the footer -->
-  <div style="margin-top:24px; padding:16px 18px; background:white; border:1px solid #e5e7eb; border-radius:10px;">
+  <div id="notesPanel" style="margin-top:24px; padding:16px 18px; background:white; border:1px solid #e5e7eb; border-radius:10px;">
     <div style="font-size:13px; font-weight:700; color:#111827; margin-bottom:10px;">Legend &amp; Notes</div>
 
     <div style="font-size:11px; font-weight:700; color:#6b7280; text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px;">Bar &amp; calendar cell colors</div>
@@ -270,12 +358,15 @@
 
     <div style="margin-top:14px; font-size:11px; color:#4b5563; line-height:1.7;">
       <div style="font-weight:700; color:#374151; margin-bottom:6px;">Notes</div>
-      <div>• <b>Hierarchy:</b> Project (P) ▸ Task (P-T) ▸ Subtask (P-T-S). Edit subtask data; tasks and projects roll up automatically.</div>
-      <div>• <b>Predecessors:</b> comma-separated list of IDs that must finish before this one can start (Finish-to-Start).</div>
+      <div>• <b>Hierarchy:</b> Project (P) ▸ Task (P-T) ▸ Subtask (P-T-S). Edit subtask data; tasks and projects roll up automatically (earliest start, latest end, summed costs).</div>
+      <div>• <b>Scheduled vs Actual:</b> <b>Scheduled</b> dates are the plan — set when a row is created and only changed by opening the edit modal. <b>Actual</b> dates track what really happened (or is happening). Dragging a bar shifts <b>actual</b> dates only; the schedule stays put as a baseline to measure delay against.</div>
+      <div>• <b>Predecessors:</b> comma-separated list of IDs that must finish before this one can start (Finish-to-Start). A subtask's <b>% Done</b> is locked at 0 until every predecessor reaches 100% — its rolled-up parents (task, project) also stay at 0 to reflect that no work can have begun yet.</div>
       <div>• <b>Slack (days):</b> how many days a subtask can be delayed without delaying the project end. Slack = 0 → critical path (★).</div>
       <div>• <b>Critical path:</b> the chain of subtasks with Slack = 0 (★). Any delay on these slips the project finish — focus management attention here.</div>
+      <div>• <b>Late Start vs Delay:</b> <i>Late Start</i> = scheduled start has passed but nothing has begun (no actual_start, 0%). <i>Delay / At Risk</i> = work has begun and we're past the scheduled end. They never apply at the same time.</div>
+      <div>• <b>% Done:</b> only editable on subtasks. A task's % Done is the est_cost-weighted average of its subtasks; a project's is the weighted average of its tasks. Edit a subtask and the rollup updates immediately. (Falls back to a simple average if no est_cost is set.)</div>
       <div>• <b>Cost Variance =</b> Cost-to-Date − Estimated. Negative (under budget) is good; positive (over budget) is bad.</div>
-      <div>• <b>Margin =</b> Sale Price − Cost-to-Date. % Done at task and project level rolls up from subtasks (weighted by Estimated Cost).</div>
+      <div>• <b>Margin =</b> Sale Price − Cost-to-Date. Costs and % Done roll up from subtasks; sale price is set on the project row only.</div>
       <div>• <b>Row grouping:</b> use the ▾/▸ arrows next to project/task rows to collapse subtasks, or "⊟ Collapse" in the toolbar.</div>
       <div>• <b>Saving:</b> the CSV download is the session store — reload it next time by attaching the file and re-running the gantt-chart skill.</div>
     </div>
@@ -318,6 +409,25 @@
       <div class="modal-actions">
         <button class="btn btn-cancel" onclick="closeTplModal()">Cancel</button>
         <button class="btn btn-ok" id="tpl-load-btn" onclick="loadFromTemplateModal()" disabled>Load template</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manage Users modal (admin only) -->
+  <div class="modal-overlay" id="usersModal" style="display:none" onclick="if(event.target===this)closeManageUsersModal()">
+    <div class="modal" style="max-width:600px;">
+      <h3>⚙ Manage Users</h3>
+      <p style="font-size:11px; color:#9ca3af; margin-bottom:10px;">
+        Assign a role to each user. <b>admin</b> can edit everything and manage users;
+        <b>user</b> can edit projects they create or that are shared with them;
+        <b>viewer</b> is read-only.
+      </p>
+      <input id="usersSearch" type="text" placeholder="🔎 search by email…"
+             style="width:100%; font-size:12px; padding:6px 10px; margin-bottom:8px;"
+             oninput="renderUsersList()">
+      <div id="usersList" style="max-height:60vh; overflow:auto; border:1px solid #e5e7eb; border-radius:8px;"></div>
+      <div class="modal-actions">
+        <button class="btn btn-cancel" onclick="closeManageUsersModal()">Close</button>
       </div>
     </div>
   </div>
@@ -405,6 +515,48 @@
         <p style="font-size:10px;color:#9ca3af;margin-top:4px;">Final Margin = Sale Price − Cost to Date (rolled up from all subtasks).</p>
       </div>
 
+      <!-- Sharing — shown only when editing a project the current user owns (or admin). -->
+      <div class="modal-section" id="m-share-section" style="display:none;">
+        <div class="modal-section-label">Sharing</div>
+        <div id="m-share-list" style="font-size:12px; color:#374151; margin-bottom:8px;"></div>
+
+        <!-- Invite form: searchable user dropdown + role picker.
+             flex:1 1 0 + min-width:0 lets the search shrink properly inside the
+             flex row; flex:0 0 120px pins the role select to a fixed width so
+             the modal's `.modal select { width: 100% }` rule can't swallow it. -->
+        <div style="display:flex; gap:6px; align-items:stretch; position:relative;">
+          <div style="flex:1 1 0; min-width:0; position:relative;">
+            <input id="m-share-search" type="text"
+                   placeholder="🔎 search users by email…"
+                   style="width:100%; font-size:12px; box-sizing:border-box;"
+                   oninput="onShareSearchInput()"
+                   onfocus="onShareSearchInput()"
+                   onblur="setTimeout(closeSharePicker, 150)"
+                   autocomplete="off">
+            <div id="m-share-picker"
+                 style="display:none; position:absolute; left:0; right:0; top:100%; max-height:220px; overflow-y:auto; background:white; border:1px solid #d1d5db; border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,.08); z-index:50; margin-top:2px;"></div>
+          </div>
+          <select id="m-share-role" style="font-size:12px; width:120px; flex:0 0 120px;">
+            <option value="edit">Editor</option>
+            <option value="view">Viewer</option>
+          </select>
+        </div>
+        <!-- Selected-user pill + Add button row -->
+        <div id="m-share-selected-row" style="display:none; margin-top:8px; align-items:center; gap:8px;">
+          <span id="m-share-selected-pill" style="display:inline-flex; align-items:center; gap:6px; background:#eef2ff; color:#3730a3; padding:3px 10px; border-radius:14px; font-size:12px;"></span>
+          <button type="button" class="btn btn-cancel" style="padding:2px 8px; font-size:11px;" onclick="clearShareSelected()">Clear</button>
+          <span style="flex:1;"></span>
+          <button type="button" class="btn btn-ok" onclick="addShareFromModal()">Add</button>
+        </div>
+
+        <!-- Inline status banner so failures don't disappear in a 1s toast. -->
+        <div id="m-share-status" style="display:none; margin-top:8px; padding:6px 10px; border-radius:6px; font-size:11px;"></div>
+        <p style="font-size:10px;color:#9ca3af;margin-top:6px;">
+          Project owner or admin only. Inviting a project grants access to all its tasks and subtasks.
+          Users with global role <b>viewer</b> can only be shared as Viewer.
+        </p>
+      </div>
+
       <div class="modal-actions">
         <button class="btn btn-del" id="modalDelBtn" onclick="deleteFromModal()">🗑 Delete</button>
         <button class="btn btn-cancel" onclick="closeModal()">Cancel</button>
@@ -416,9 +568,1154 @@
   <div class="drag-tip" id="dragTip"></div>
   <div class="tip" id="tip"></div>
 
+  <!-- Load the full CPM scheduler (ES module) and expose it on window.
+       Module scripts are deferred, so window.Scheduler is defined before any
+       user-triggered handler (e.g. Load-from-template) needs it. -->
+  <script type="module">
+    import * as Scheduler from './scripts/scheduler.js';
+    window.Scheduler = Scheduler;
+  </script>
+
+  <!-- Supabase wiring: auth, role-aware load/save, cloud persistence.
+       Exposes window.Supa.{signIn, signOut, loadBoard, queueUpsertAll}.
+       The main script below hooks into saveLocal() to push edits up. -->
+  <script type="module">
+    import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+    const SUPABASE_URL              = "https://gdliekkwgsffeufraphk.supabase.co";
+    const SUPABASE_PUBLISHABLE_KEY  = "sb_publishable_Nkpe931Zpj0Ghhm2x3WCmQ_7U_8UxvD";
+
+    // Wrap fetch so every Supabase HTTP call is visible in the console with
+    // method, path, status, duration, and the tab/network state at request time.
+    // Pair this with the browser Network tab: a request logged here with no
+    // matching "[Supa←]" or "[Supa✗]" line is one that's still hanging.
+    let supaReqSeq = 0;
+    const loggedFetch = (input, init = {}) => {
+      const url     = typeof input === "string" ? input : (input.url || String(input));
+      const method  = (init.method || (typeof input === "object" && input.method) || "GET").toUpperCase();
+      const path    = url.replace(SUPABASE_URL, "") || "/";
+      const id      = ++supaReqSeq;
+      const startedAt = performance.now();
+      const ctx     = `online=${navigator.onLine} visible=${document.visibilityState}`;
+
+      console.log(`[Supa→] #${id} ${method} ${path} (${ctx})`);
+
+      return fetch(input, init).then(
+        (res) => {
+          const ms = Math.round(performance.now() - startedAt);
+          const fn = res.ok ? "log" : "warn";
+          console[fn](`[Supa←] #${id} ${res.status} ${res.statusText} in ${ms}ms — ${method} ${path}`);
+          return res;
+        },
+        (err) => {
+          const ms = Math.round(performance.now() - startedAt);
+          console.error(`[Supa✗] #${id} ${err.name}: ${err.message} after ${ms}ms — ${method} ${path} (${ctx})`);
+          throw err;
+        }
+      );
+    };
+
+    const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+      global: { fetch: loggedFetch },
+    });
+
+    // Logs the current pendingNodes snapshot. Used by the visibility handler
+    // and the queue path so hidden→visible cycles are easy to follow.
+    function logPending(prefix) {
+      if (!pendingNodes || !pendingNodes.length) {
+        console.log(`${prefix} no pending nodes`);
+        return;
+      }
+      console.log(`${prefix} ${pendingNodes.length} pending node(s):`,
+        pendingNodes.map(n => `${n.id}${n.name ? ` "${n.name}"` : ""}`).join(", "));
+    }
+    window.addEventListener("online",  () => console.log("[Supa] network: ONLINE"));
+    window.addEventListener("offline", () => console.warn("[Supa] network: OFFLINE"));
+    // Visibility handling: hidden just logs; visible flushes any pending
+    // snapshot directly via flushPending (sync, no setTimeout indirection).
+    document.addEventListener("visibilitychange", () => {
+      console.log(`[Supa] visibility: ${document.visibilityState} (online=${navigator.onLine})`);
+
+      if (document.visibilityState === "hidden") {
+        logPending("[Supa] tab hidden —");
+        return;
+      }
+
+      logPending("[Supa] tab visible —");
+
+      if (pendingNodes && currentUserId && currentRole !== "viewer") {
+        console.log("[Supa] flushing pending edits now (sync, no setTimeout)");
+        flushPending();
+      }
+    });
+
+    let currentUserId = null;
+    let currentRole   = null;
+    let pendingEmail  = null;   // email we sent the OTP code to, awaiting verification
+    let supaToken     = null;   // cached access_token — keeps the hot upsert path off supabase-js
+
+    // ─── Auth: email OTP code (6-digit) — no clickable link, no prefetch issues ───
+    async function signIn(email) {
+      if (!email || !email.includes("@")) { alert("Enter a valid email"); return; }
+      const { error } = await supabase.auth.signInWithOtp({ email });
+      if (error) { alert("Send code failed: " + error.message); return; }
+      pendingEmail = email;
+      renderAuthBar({ awaitingCode: true, email });
+    }
+
+    async function verifyCode(code) {
+      if (!pendingEmail) { alert("Send a code first"); return; }
+      const token = (code || "").trim();
+      if (!token) { alert("Enter the code from your email"); return; }
+      const { data, error } = await supabase.auth.verifyOtp({
+        email: pendingEmail,
+        token,
+        type: "email",
+      });
+      if (error) { alert("Code rejected: " + error.message); return; }
+      pendingEmail = null;
+
+      // Drive the post-signin flow off the returned session directly. Relying
+      // solely on onAuthStateChange "SIGNED_IN" leaves the UI stuck on
+      // "Code sent" when the event doesn't fire (cross-tab race, the event
+      // arrives as INITIAL_SESSION instead of SIGNED_IN, etc.).
+      if (data?.session?.user) {
+        await applySignedIn(data.session);
+      }
+    }
+
+    function cancelCode() {
+      pendingEmail = null;
+      renderAuthBar({ email: null, role: null });
+    }
+
+    // signOut: don't wait for the server's /logout call (that's what was slow).
+    // Local-scope sign-out clears the client session synchronously, then we
+    // reload — perceived latency goes from ~1s to instant.
+    async function signOut() {
+      try { await supabase.auth.signOut({ scope: 'local' }); } catch (_) {}
+      location.reload();
+    }
+
+    async function fetchRole(userId) {
+      const { data } = await supabase
+        .from("profiles").select("role").eq("user_id", userId).single();
+      return data?.role || "viewer";
+    }
+
+    // Populate the set of project ids the current user can edit:
+    //   admin  → every project
+    //   viewer → empty
+    //   user   → projects they own + projects shared with them with can_edit=true
+    async function refreshEditableProjects() {
+      if (!currentUserId) {
+        window.__editableProjectIds = new Set();
+        return;
+      }
+      if (currentRole === "viewer") {
+        window.__editableProjectIds = new Set();
+        return;
+      }
+      if (currentRole === "admin") {
+        const { data } = await supabase.from("tasks")
+          .select("id").is("parent_id", null);
+        window.__editableProjectIds = new Set((data || []).map(r => r.id));
+        return;
+      }
+      // Regular user
+      const [own, shared] = await Promise.all([
+        supabase.from("tasks").select("id")
+          .is("parent_id", null).eq("owner_user_id", currentUserId),
+        supabase.from("project_shares").select("project_id")
+          .eq("shared_with", currentUserId).eq("can_edit", true),
+      ]);
+      const set = new Set((own.data    || []).map(r => r.id));
+      for (const r of (shared.data || [])) set.add(r.project_id);
+      window.__editableProjectIds = set;
+    }
+
+    // Per-id record of the last row we saw from the server: { fields..., version }.
+    // Used to (a) detect locally-dirty rows by snapshot diff, (b) pass `version`
+    // back in PATCH OCC checks, and (c) suppress realtime echoes of our own writes.
+    const serverRows = new Map();   // id -> { ...fields, version }
+    const dirtyIds   = new Set();   // ids the local user has touched since last save
+
+    function rowToServerSnapshot(r) {
+      return {
+        id: r.id, kind: r.kind, name: r.name, owner: r.owner,
+        parent_id: r.parent_id, duration_days: r.duration_days,
+        sched_start: r.sched_start, sched_end: r.sched_end,
+        actual_start: r.actual_start, actual_end: r.actual_end,
+        slack_days: r.slack_days, pct_done: r.pct_done,
+        est_cost: r.est_cost, cost_to_date: r.cost_to_date,
+        sale_price: r.sale_price,
+        version: r.version != null ? Number(r.version) : 1,
+      };
+    }
+
+    // ─── Load board from Supabase, translate to NODES shape, hand off to main script ───
+    async function loadBoard() {
+      const [{ data: rows, error: e1 }, { data: edges, error: e2 }] = await Promise.all([
+        supabase.from("tasks").select("*"),
+        supabase.from("task_predecessors").select("*"),
+      ]);
+      if (e1) { console.error("tasks read failed", e1); return; }
+      if (e2) { console.error("preds read failed", e2); return; }
+      if (!rows || rows.length === 0) return; // empty cloud board → keep local
+
+      const predsByTask = new Map();
+      for (const e of edges || []) {
+        const tag = `${e.pred_id}${e.type === "FS" ? "" : e.type}` +
+                    (e.lag_days ? (e.lag_days > 0 ? "+" : "") + e.lag_days : "");
+        if (!predsByTask.has(e.task_id)) predsByTask.set(e.task_id, []);
+        predsByTask.get(e.task_id).push(tag);
+      }
+      // Seed the server-snapshot maps so diff-based saves know what's clean.
+      serverRows.clear();
+      serverPreds.clear();
+      dirtyIds.clear();
+      for (const r of rows) serverRows.set(r.id, rowToServerSnapshot(r));
+      // Per-task predecessor signature (sorted/deduped id list) — what the
+      // server thinks each task's predecessors are.
+      for (const [taskId, tags] of predsByTask.entries()) {
+        serverPreds.set(taskId, predSignature(tags.join(",")));
+      }
+
+      const nodes = rows.map(r => ({
+        id: r.id,
+        type: r.kind,
+        name: r.name,
+        owner: r.owner || "",
+        predecessors: (predsByTask.get(r.id) || []).join(", "),
+        sched_start: r.sched_start || "",
+        sched_end:   r.sched_end   || "",
+        actual_start: r.actual_start || "",
+        actual_end:   r.actual_end   || "",
+        slack: r.slack_days != null ? String(r.slack_days) : "",
+        percent_done: Number(r.pct_done) || 0,
+        est_cost:     r.est_cost     != null ? Number(r.est_cost)     : "",
+        cost_to_date: r.cost_to_date != null ? Number(r.cost_to_date) : "",
+        sale_price:   r.sale_price   != null ? Number(r.sale_price)   : "",
+        version:      r.version != null ? Number(r.version) : 1,
+        collapsed: false,
+      }));
+      if (typeof window.replaceNodes === "function") window.replaceNodes(nodes);
+    }
+
+    // ─── Save: visibility-aware fire-and-forget.
+    //    Visible: queueMicrotask collapses same-turn edits, then flush.
+    //    Hidden:  stash pendingNodes (already in localStorage); the visibility
+    //             listener flushes on resume.
+    let pendingNodes   = null;
+    let flushScheduled = false;     // microtask-level coalescing flag
+
+    function queueUpsertAll(nodes) {
+      console.log("[Supa] queueUpsertAll:", nodes.length, "nodes — userId:", currentUserId, "role:", currentRole, "visible:", document.visibilityState);
+      if (!currentUserId)              { console.log("[Supa] skip: not signed in"); return; }
+      if (currentRole === "viewer")    { console.log("[Supa] skip: viewer role"); return; }
+      pendingNodes = structuredClone(nodes);
+
+      // Mark locally-modified ids as dirty synchronously, so realtime echoes
+      // arriving between now and the network round-trip don't overwrite the
+      // user's in-flight edits.
+      for (const n of nodes) {
+        const seen = serverRows.get(n.id);
+        const rowDiff  = !seen || rowChanged(nodeToDbRow(n), seen);
+        const predDiff = predSignature(n.predecessors) !== (serverPreds.get(n.id) || "");
+        if (rowDiff || predDiff) dirtyIds.add(n.id);
+      }
+
+      if (document.visibilityState !== "visible") {
+        logPending("[Supa] tab hidden — deferring, queued");
+        return;
+      }
+      // Coalesce multiple edits in the same JS turn into a single flush.
+      if (flushScheduled) return;
+      flushScheduled = true;
+      queueMicrotask(() => {
+        flushScheduled = false;
+        flushPending();
+      });
+    }
+
+    // Every flush fires upsertAll fire-and-forget via .then(). No queue lock.
+    // Upserts are idempotent (onConflict=id), so any rare overlap is harmless.
+    function flushPending() {
+      if (!pendingNodes) return;
+      if (document.visibilityState !== "visible") {
+        logPending("[Supa] flushPending: tab hidden, deferring —");
+        return;
+      }
+      const snap = pendingNodes;
+      pendingNodes = null;
+      console.log("[Supa] flushPending: firing upsertAll for", snap.length, "nodes");
+      upsertAll(snap).then(
+        () => { /* success path already logs inside upsertAll */ },
+        (e) => {
+          console.error("[Supa] upsertAll failed:", e?.message || e);
+          if (!pendingNodes) pendingNodes = snap;   // restore so the next edit/resume can retry
+        }
+      );
+    }
+    // Raw PostgREST call — uses loggedFetch directly with a cached access_token.
+    // Heartbeat fires after 2s of waiting (silent on fast calls) so if a call
+    // ever stalls, we get a 2-second timestamped log proving JS is alive.
+    async function rawPostgrest(method, path, body, prefer, label) {
+      const startedAt = Date.now();
+      if (!supaToken) throw new Error("[Supa] no access token cached");
+      let heartbeat = null;
+      const heartbeatStart = setTimeout(() => {
+        heartbeat = setInterval(() => {
+          console.warn(`[Supa] STILL AWAITING ${label} after ${Math.round((Date.now()-startedAt)/1000)}s (visible=${document.visibilityState}, online=${navigator.onLine})`);
+        }, 2000);
+      }, 2000);
+      try {
+        console.log(`[Supa] executing ${label} (raw fetch)`);
+        const headers = {
+          "apikey": SUPABASE_PUBLISHABLE_KEY,
+          "Authorization": `Bearer ${supaToken}`,
+          "Content-Type": "application/json",
+        };
+        if (prefer) headers["Prefer"] = prefer;
+        const res = await loggedFetch(`${SUPABASE_URL}${path}`, {
+          method,
+          headers,
+          body: body == null ? undefined : JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          throw new Error(`HTTP ${res.status} ${res.statusText}: ${text}`);
+        }
+        console.log(`[Supa] completed ${label} in ${Date.now()-startedAt}ms`);
+        return res;
+      } finally {
+        clearTimeout(heartbeatStart);
+        if (heartbeat) clearInterval(heartbeat);
+      }
+    }
+
+    // ─── Field translation + diff helpers ───
+    function parentIdOf(id) {
+      const parts = String(id).split("-");
+      return parts.length === 1 ? null : parts.slice(0, -1).join("-");
+    }
+
+    function nodeToDbRow(n) {
+      return {
+        id: n.id,
+        parent_id: parentIdOf(n.id),
+        kind: n.type,
+        name: n.name,
+        owner: n.owner || null,
+        duration_days: 0,
+        sched_start: n.sched_start || null,
+        sched_end: n.sched_end || null,
+        actual_start: n.actual_start || null,
+        actual_end: n.actual_end || null,
+        slack_days: n.slack === "" || n.slack == null ? null : parseInt(n.slack, 10),
+        pct_done: Number(n.percent_done) || 0,
+        est_cost: Number(n.est_cost) || 0,
+        cost_to_date: Number(n.cost_to_date) || 0,
+        sale_price: Number(n.sale_price) || 0,
+      };
+    }
+
+    // Coerce both sides to comparable shapes (server returns numerics as strings
+    // sometimes, "" vs null differ, etc.) so the diff doesn't false-positive.
+    function normalizeForDiff(r) {
+      const num = (v) => v == null || v === "" ? 0 : Number(v);
+      return {
+        kind:          r.kind ?? null,
+        name:          r.name ?? null,
+        owner:         r.owner || null,
+        parent_id:     r.parent_id ?? null,
+        duration_days: num(r.duration_days),
+        sched_start:   r.sched_start || null,
+        sched_end:     r.sched_end   || null,
+        actual_start:  r.actual_start || null,
+        actual_end:    r.actual_end   || null,
+        slack_days:    r.slack_days == null ? null : Number(r.slack_days),
+        pct_done:      num(r.pct_done),
+        est_cost:      num(r.est_cost),
+        cost_to_date:  num(r.cost_to_date),
+        sale_price:    num(r.sale_price),
+      };
+    }
+    function rowChanged(a, b) {
+      if (!b) return true;
+      return JSON.stringify(normalizeForDiff(a)) !== JSON.stringify(normalizeForDiff(b));
+    }
+
+    // Normalize a node's predecessors string to a sorted, deduped id list so we
+    // can detect "predecessors actually changed" cheaply.
+    function predSignature(predStr) {
+      if (!predStr) return "";
+      const ids = String(predStr).split(/[,;]\s*/).map(s => s.trim()).filter(Boolean)
+        .map(raw => {
+          const m = raw.match(/^[A-Za-z]\d+(-[A-Za-z]\d+)*/);
+          return m ? m[0] : raw;
+        });
+      return Array.from(new Set(ids)).sort().join(",");
+    }
+
+    // Map of task_id -> predecessor-string-signature as the server last saw it.
+    // Populated by loadBoard and updated after every successful preds sync.
+    const serverPreds = new Map();
+
+    // Recent writes we just made; realtime will echo these back and we don't
+    // want to re-apply our own change. Keyed by `${id}@${version}`.
+    const recentWrites = new Set();
+    function markRecentWrite(id, version) {
+      const key = `${id}@${version}`;
+      recentWrites.add(key);
+      setTimeout(() => recentWrites.delete(key), 10000);
+    }
+
+    function flashBadge(text, ok) {
+      const badge = document.getElementById("dirtyBadge");
+      if (!badge) return;
+      badge.textContent       = text;
+      badge.style.background  = ok ? "#dcfce7" : "#fee2e2";
+      badge.style.color       = ok ? "#166534" : "#991b1b";
+      badge.style.borderColor = ok ? "#bbf7d0" : "#fecaca";
+      badge.style.display     = "";
+      clearTimeout(flashBadge._t);
+      flashBadge._t = setTimeout(() => { badge.style.display = "none"; }, 2500);
+    }
+
+    // ─── Row-level diffed sync with optimistic concurrency ───
+    //   - INSERT  for ids not in serverRows
+    //   - PATCH   with ?id=eq.X&version=eq.N for ids whose fields changed
+    //   - SKIP    rows whose normalized shape matches serverRows
+    //   - On PATCH returning 0 rows the row was edited by someone else: refetch
+    //     and warn; the user's local edit stays in NODES so the next save retries.
+    async function upsertAll(nodes) {
+      console.log("[Supa] sync firing for", nodes.length, "nodes");
+
+      // Dedupe ids defensively (NODES should already be unique, but if not, last wins).
+      const byId = new Map();
+      for (const n of nodes) {
+        if (!n.id) continue;
+        byId.set(n.id, nodeToDbRow(n));
+      }
+
+      const inserts = [];
+      const updates = [];          // { row, seenVersion }
+      for (const row of byId.values()) {
+        const seen = serverRows.get(row.id);
+        if (!seen)               inserts.push(row);
+        else if (rowChanged(row, seen)) updates.push({ row, seenVersion: seen.version || 1 });
+      }
+      console.log(`[Supa] plan: ${inserts.length} insert, ${updates.length} update, ${byId.size - inserts.length - updates.length} unchanged`);
+
+      // INSERTS — batched.
+      if (inserts.length) {
+        const res = await rawPostgrest(
+          "POST",
+          "/rest/v1/tasks",
+          inserts,
+          "return=representation",
+          `tasks.insert(${inserts.length})`
+        );
+        const created = await res.json().catch(() => []);
+        for (const r of created) {
+          serverRows.set(r.id, rowToServerSnapshot(r));
+          markRecentWrite(r.id, r.version);
+          dirtyIds.delete(r.id);
+        }
+      }
+
+      // UPDATES — per-row with OCC. PostgREST URL filter `version=eq.<seen>`
+      // makes the WHERE clause; if version has moved on the server the response
+      // is an empty array.
+      const conflicts = [];
+      for (const { row, seenVersion } of updates) {
+        const body = { ...row };
+        delete body.id;            // can't change pk
+        const res = await rawPostgrest(
+          "PATCH",
+          `/rest/v1/tasks?id=eq.${encodeURIComponent(row.id)}&version=eq.${seenVersion}`,
+          body,
+          "return=representation",
+          `tasks.update:${row.id}@v${seenVersion}`
+        );
+        const after = await res.json().catch(() => []);
+        if (!after || !after.length) {
+          conflicts.push(row.id);
+          // Leave dirty so the next save retries against the new version.
+        } else {
+          serverRows.set(after[0].id, rowToServerSnapshot(after[0]));
+          markRecentWrite(after[0].id, after[0].version);
+          dirtyIds.delete(after[0].id);
+        }
+      }
+
+      // Refetch conflicting rows so the next save attempt uses the new version.
+      // We do NOT clobber NODES — the user's local edits are preserved so they
+      // can retry; the next syncNodes will see the new server version and PATCH
+      // against it. (Last-write-wins per row, but at least the user is warned.)
+      if (conflicts.length) {
+        await refetchTasks(conflicts);
+        const list = conflicts.join(", ");
+        console.warn("[Supa] OCC conflict on:", list, "— remote was newer; refetched. Your local edits stay queued.");
+        flashBadge(`⚠ Conflict on ${conflicts.length} row(s) — see console`, false);
+      }
+
+      // ─── Predecessor sync ───
+      // For each task whose predecessor signature changed since the server saw
+      // it, delete its predecessor rows and reinsert the current set.
+      const predsChanged = [];
+      for (const n of nodes) {
+        const sig = predSignature(n.predecessors);
+        if (sig !== (serverPreds.get(n.id) || "")) predsChanged.push(n);
+      }
+
+      if (predsChanged.length) {
+        const idList = predsChanged.map(n => encodeURIComponent(n.id)).join(",");
+        await rawPostgrest(
+          "DELETE",
+          `/rest/v1/task_predecessors?task_id=in.(${idList})`,
+          null,
+          "return=minimal",
+          `preds.delete(${predsChanged.length})`
+        );
+        const edges = [];
+        const seen  = new Set();
+        for (const n of predsChanged) {
+          if (!n.predecessors) {
+            serverPreds.set(n.id, "");
+            continue;
+          }
+          const parts = String(n.predecessors).split(/[,;]\s*/).map(s => s.trim()).filter(Boolean);
+          for (const raw of parts) {
+            try {
+              const e = window.Scheduler.parsePredecessor(raw);
+              const key = `${n.id}\x00${e.predId}`;
+              if (seen.has(key)) continue;
+              seen.add(key);
+              edges.push({ task_id: n.id, pred_id: e.predId, type: e.type, lag_days: e.lag });
+            } catch (_) {}
+          }
+          serverPreds.set(n.id, predSignature(n.predecessors));
+        }
+        if (edges.length) {
+          await rawPostgrest(
+            "POST",
+            "/rest/v1/task_predecessors",
+            edges,
+            "return=minimal",
+            `preds.insert(${edges.length})`
+          );
+        }
+        // Preds saved — clear dirty for any task that's not still flagged by
+        // a pending row-level OCC conflict.
+        for (const n of predsChanged) {
+          if (!conflicts.includes(n.id)) dirtyIds.delete(n.id);
+        }
+      }
+
+      if (!conflicts.length && (inserts.length || updates.length || predsChanged.length)) {
+        flashBadge("Synced ✓", true);
+      } else if (!inserts.length && !updates.length && !predsChanged.length) {
+        // Nothing to do — silent.
+      }
+    }
+
+    // Refetch one or more rows by id and overwrite their server snapshot.
+    async function refetchTasks(ids) {
+      if (!ids || !ids.length) return;
+      const idList = ids.map(id => encodeURIComponent(id)).join(",");
+      const res = await rawPostgrest(
+        "GET",
+        `/rest/v1/tasks?id=in.(${idList})&select=*`,
+        null,
+        null,
+        `tasks.refetch(${ids.length})`
+      );
+      const rows = await res.json().catch(() => []);
+      for (const r of rows) serverRows.set(r.id, rowToServerSnapshot(r));
+    }
+
+    async function deleteRows(ids) {
+      if (!currentUserId) {
+        console.log("[Supa] delete skipped: not signed in");
+        return;
+      }
+      if (currentRole === "viewer") {
+        console.log("[Supa] delete skipped: viewer role");
+        return;
+      }
+      if (!ids || !ids.length) return;
+
+      console.log("[Supa] deleting rows:", ids);
+
+      const idList = ids.map(id => encodeURIComponent(id)).join(",");
+
+      // Delete predecessor edges first (FK rows would block tasks delete otherwise
+      // if ON DELETE CASCADE isn't set). Then delete the tasks themselves.
+      try {
+        await rawPostgrest(
+          "DELETE",
+          `/rest/v1/task_predecessors?task_id=in.(${idList})`,
+          null,
+          "return=minimal",
+          "tasks.delete:preds-by-task"
+        );
+        await rawPostgrest(
+          "DELETE",
+          `/rest/v1/task_predecessors?pred_id=in.(${idList})`,
+          null,
+          "return=minimal",
+          "tasks.delete:preds-by-pred"
+        );
+        await rawPostgrest(
+          "DELETE",
+          `/rest/v1/tasks?id=in.(${idList})`,
+          null,
+          "return=minimal",
+          "tasks.delete"
+        );
+        // Forget these rows on the client side so the next save's diff doesn't
+        // see them as missing-and-needing-insert.
+        for (const id of ids) {
+          serverRows.delete(id);
+          serverPreds.delete(id);
+        }
+        console.log("[Supa] cloud delete OK for", ids.length, "row(s)");
+      } catch (e) {
+        console.error("[Supa] cloud delete failed:", e?.message || e);
+      }
+    }
+
+    // ─── Auth bar UI — three states: signed-in, awaiting-code, not-signed-in ───
+    function renderAuthBar({ email, role, awaitingCode }) {
+      const status        = document.getElementById("auth-status");
+      const badge         = document.getElementById("auth-role");
+      const signin        = document.getElementById("auth-signin");
+      const awaiting      = document.getElementById("auth-awaiting");
+      const awaitingEmail = document.getElementById("auth-awaiting-email");
+      const signedin      = document.getElementById("auth-signedin");
+      const display       = document.getElementById("auth-email-display");
+
+      // hide all stages, then show the right one
+      signin.style.display   = "none";
+      awaiting.style.display = "none";
+      signedin.style.display = "none";
+      badge.style.display    = "none";
+
+      if (role) {
+        status.textContent  = "Signed in as";
+        badge.textContent   = role;
+        badge.className     = "role-badge " + role;
+        badge.style.display = "";
+        signedin.style.display = "";
+        display.textContent = email;
+      } else if (awaitingCode) {
+        status.textContent  = "Code sent — check your email";
+        awaiting.style.display = "";
+        awaitingEmail.textContent = email + " ·";
+        setTimeout(() => {
+          const codeInput = document.getElementById("auth-code");
+          if (codeInput) { codeInput.value = ""; codeInput.focus(); }
+        }, 50);
+      } else {
+        status.textContent = "Not signed in";
+        signin.style.display = "";
+      }
+    }
+
+    // ─── Bootstrap ───
+    // ─── Realtime: subscribe to remote changes and merge them into NODES ───
+    // postgres_changes pushes INSERT/UPDATE/DELETE events on the listed tables.
+    // Skip our own writes (matched via recentWrites) so we don't bounce echoes.
+    // Skip ids that are locally dirty so we don't clobber the user's in-flight
+    // edits with stale-from-the-user's-POV remote data.
+    let realtimeChannel = null;
+
+    function dbRowToNode(r, predString) {
+      return {
+        id: r.id,
+        type: r.kind,
+        name: r.name,
+        owner: r.owner || "",
+        predecessors: predString != null ? predString : "",
+        sched_start:  r.sched_start  || "",
+        sched_end:    r.sched_end    || "",
+        actual_start: r.actual_start || "",
+        actual_end:   r.actual_end   || "",
+        slack:        r.slack_days != null ? String(r.slack_days) : "",
+        percent_done: Number(r.pct_done) || 0,
+        est_cost:     r.est_cost     != null ? Number(r.est_cost)     : "",
+        cost_to_date: r.cost_to_date != null ? Number(r.cost_to_date) : "",
+        sale_price:   r.sale_price   != null ? Number(r.sale_price)   : "",
+        version:      r.version != null ? Number(r.version) : 1,
+        collapsed:    false,
+      };
+    }
+
+    function applyRemoteTaskChange(payload) {
+      const evt = payload.eventType;            // INSERT | UPDATE | DELETE
+      const r   = payload.new || payload.old;
+      if (!r || !r.id) return;
+      // Echo of our own write? Skip — local state is already correct.
+      if (payload.new && recentWrites.has(`${payload.new.id}@${payload.new.version}`)) {
+        console.log(`[Supa rt] skip own echo ${payload.new.id}@${payload.new.version}`);
+        return;
+      }
+      // Locally dirty rows: user is mid-edit. Don't overwrite their NODES copy;
+      // their next save will OCC-conflict, refetch, and reconcile.
+      if (dirtyIds.has(r.id) && evt !== "DELETE") {
+        console.log(`[Supa rt] skip locally-dirty ${r.id}`);
+        return;
+      }
+
+      if (evt === "DELETE") {
+        serverRows.delete(r.id);
+        serverPreds.delete(r.id);
+        const arr = window.__NODES__;
+        if (Array.isArray(arr)) {
+          const idx = arr.findIndex(n => n.id === r.id);
+          if (idx >= 0) arr.splice(idx, 1);
+        }
+      } else {
+        serverRows.set(r.id, rowToServerSnapshot(payload.new));
+        const arr = window.__NODES__;
+        if (Array.isArray(arr)) {
+          const idx = arr.findIndex(n => n.id === payload.new.id);
+          // Preserve the current predecessors string and collapsed state from
+          // the local copy — preds come through a separate channel; collapse
+          // is UI-only and shouldn't be reset by remote updates.
+          const localPreds  = idx >= 0 ? arr[idx].predecessors : "";
+          const wasCollapsed = idx >= 0 ? !!arr[idx].collapsed : false;
+          const newNode = dbRowToNode(payload.new, localPreds);
+          newNode.collapsed = wasCollapsed;
+          if (idx >= 0) arr[idx] = newNode; else arr.push(newNode);
+        }
+      }
+      try { window.__rerender && window.__rerender(); } catch (_) {}
+    }
+
+    async function applyRemotePredChange(payload) {
+      // Predecessor edges are managed as a wipe-and-reinsert per task by
+      // upsertAll, so any single INSERT/DELETE event is part of a larger
+      // batch. The simplest correct merge is: re-pull predecessors for the
+      // affected task_id and rebuild that node's predecessors string.
+      const r = payload.new || payload.old;
+      if (!r || !r.task_id) return;
+      if (dirtyIds.has(r.task_id)) return;     // local edit in flight
+
+      const { data: edges, error } = await supabase
+        .from("task_predecessors").select("*").eq("task_id", r.task_id);
+      if (error) { console.warn("[Supa rt] preds refetch failed", error); return; }
+      const tags = (edges || []).map(e => {
+        const tag = `${e.pred_id}${e.type === "FS" ? "" : e.type}`
+                  + (e.lag_days ? (e.lag_days > 0 ? "+" : "") + e.lag_days : "");
+        return tag;
+      });
+      const predString = tags.join(", ");
+      serverPreds.set(r.task_id, predSignature(predString));
+      const arr = window.__NODES__;
+      if (Array.isArray(arr)) {
+        const idx = arr.findIndex(n => n.id === r.task_id);
+        if (idx >= 0) arr[idx].predecessors = predString;
+      }
+      try { window.__rerender && window.__rerender(); } catch (_) {}
+    }
+
+    // Any change to project_shares affects "what can I edit" — refresh the
+    // editable-projects set and, if the user has the share modal open for
+    // this project, refresh the displayed list too.
+    function applyRemoteShareChange(payload) {
+      console.log("[Supa rt] project_shares change:", payload.eventType, payload.new || payload.old);
+      refreshEditableProjects().catch(() => {});
+      const r = payload.new || payload.old;
+      const section = document.getElementById("m-share-section");
+      if (r?.project_id && section && section.style.display !== "none" &&
+          section.dataset.projectId === r.project_id &&
+          typeof window.refreshShareList === "function") {
+        window.refreshShareList(r.project_id);
+      }
+    }
+
+    function subscribeRealtime() {
+      if (realtimeChannel) return;             // already subscribed
+      realtimeChannel = supabase
+        .channel("board")
+        .on("postgres_changes",
+            { event: "*", schema: "public", table: "tasks" },
+            applyRemoteTaskChange)
+        .on("postgres_changes",
+            { event: "*", schema: "public", table: "task_predecessors" },
+            applyRemotePredChange)
+        .on("postgres_changes",
+            { event: "*", schema: "public", table: "project_shares" },
+            applyRemoteShareChange)
+        .subscribe((status) => {
+          console.log("[Supa rt] channel status:", status);
+        });
+    }
+
+    // Idempotent post-signin flow. Safe to call multiple times — guards on
+    // currentUserId so we don't redundantly reload the board on every
+    // TOKEN_REFRESHED event.
+    let _applySignedInInflight = false;
+    async function applySignedIn(session) {
+      if (!session?.user) return;
+      const sameUser = currentUserId === session.user.id;
+      currentUserId = session.user.id;
+      supaToken     = session.access_token;
+      if (sameUser) return;                       // already signed in as this user
+      if (_applySignedInInflight) return;
+      _applySignedInInflight = true;
+      try {
+        currentRole = await fetchRole(currentUserId);
+        renderAuthBar({ email: session.user.email, role: currentRole });
+        document.body.classList.remove("signed-out");
+        if (currentRole === "viewer") document.body.classList.add("readonly");
+        await loadBoard();
+        await refreshEditableProjects();
+        subscribeRealtime();
+      } finally {
+        _applySignedInInflight = false;
+      }
+    }
+
+    function applySignedOut() {
+      currentUserId = null;
+      currentRole   = null;
+      supaToken     = null;
+      document.body.classList.add("signed-out");
+      renderAuthBar({ email: null, role: null });
+    }
+
+    async function init() {
+      document.body.classList.add("with-authbar");
+      document.body.classList.add("signed-out");   // default to hidden until confirmed
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        await applySignedIn(session);
+      } else {
+        applySignedOut();
+      }
+      supabase.auth.onAuthStateChange(async (evt, sess) => {
+        // Any event that carries a session is treated as "signed in" — covers
+        // SIGNED_IN, INITIAL_SESSION, TOKEN_REFRESHED, USER_UPDATED so the UI
+        // unsticks even if the expected event name doesn't fire.
+        if (sess?.user && evt !== "SIGNED_OUT") {
+          await applySignedIn(sess);
+        } else if (evt === "SIGNED_OUT") {
+          location.reload();
+        }
+      });
+    }
+    // Manual save trigger for testing — call from devtools: window.Supa.forceSave()
+    // Runs the raw-fetch path on whatever's currently in NODES, bypassing the
+    // queueMicrotask coalescer. Useful for isolating "does the new save path
+    // work right now?" from "does an edit eventually trigger the save?".
+    function forceSave() {
+      const nodes = (typeof window !== "undefined" && Array.isArray(window.__NODES__))
+        ? window.__NODES__
+        : null;
+      if (!nodes) {
+        console.warn("[Supa] forceSave: no NODES exposed. Run window.Supa.forceSaveWith(nodes) instead, or just edit something in the UI.");
+        return Promise.resolve();
+      }
+      return forceSaveWith(nodes);
+    }
+    function forceSaveWith(nodes) {
+      console.log("[Supa] forceSave: firing upsertAll for", nodes.length, "nodes (raw fetch path)");
+      return upsertAll(structuredClone(nodes)).then(
+        () => console.log("[Supa] forceSave: SUCCESS"),
+        (e) => console.error("[Supa] forceSave: FAILED:", e?.message || e)
+      );
+    }
+
+    // ─── Sharing: project_shares helpers ───
+    // The RLS policies on project_shares enforce that only the project owner
+    // (or an admin) can write rows; the client just submits and trusts the DB
+    // to reject if not authorized.
+
+    // Find a profile by email. Returns { user_id, email, role } or null.
+    async function lookupUserByEmail(email) {
+      const e = String(email || "").trim().toLowerCase();
+      if (!e) return null;
+      const { data, error } = await supabase
+        .from("profiles").select("user_id,email,role").eq("email", e).maybeSingle();
+      if (error) { console.error("[Supa] lookupUserByEmail failed", error); return null; }
+      return data || null;
+    }
+
+    // List all shares on a project. Each row: { project_id, shared_with, can_edit, shared_by, created_at }.
+    // Also returns enriched .email / .role from the profiles table.
+    async function listShares(projectId) {
+      const { data, error } = await supabase
+        .from("project_shares")
+        .select("project_id, shared_with, can_edit, shared_by, created_at")
+        .eq("project_id", projectId);
+      if (error) { console.error("[Supa] listShares failed", error); return []; }
+      if (!data || !data.length) return [];
+      // Hydrate emails from profiles
+      const ids  = [...new Set(data.map(r => r.shared_with))];
+      const { data: profs } = await supabase
+        .from("profiles").select("user_id,email,role").in("user_id", ids);
+      const byId = Object.fromEntries((profs || []).map(p => [p.user_id, p]));
+      return data.map(r => ({
+        ...r,
+        email: byId[r.shared_with]?.email || "(unknown)",
+        role:  byId[r.shared_with]?.role  || "user",
+      }));
+    }
+
+    async function addShare(projectId, sharedWithUserId, canEdit) {
+      const { error } = await supabase
+        .from("project_shares")
+        .upsert(
+          { project_id: projectId, shared_with: sharedWithUserId, can_edit: !!canEdit, shared_by: currentUserId },
+          { onConflict: "project_id,shared_with" }
+        );
+      if (error) { console.error("[Supa] addShare failed", error); throw error; }
+      // Mine filter set may now include another project — refresh.
+      refreshEditableProjects();
+    }
+
+    async function updateShare(projectId, sharedWithUserId, canEdit) {
+      const { error } = await supabase
+        .from("project_shares")
+        .update({ can_edit: !!canEdit })
+        .eq("project_id", projectId).eq("shared_with", sharedWithUserId);
+      if (error) { console.error("[Supa] updateShare failed", error); throw error; }
+      refreshEditableProjects();
+    }
+
+    async function removeShare(projectId, sharedWithUserId) {
+      const { error } = await supabase
+        .from("project_shares")
+        .delete()
+        .eq("project_id", projectId).eq("shared_with", sharedWithUserId);
+      if (error) { console.error("[Supa] removeShare failed", error); throw error; }
+      refreshEditableProjects();
+    }
+
+    // ─── Admin: manage user roles ───
+    async function listAllProfiles() {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("user_id, email, role")
+        .order("email", { ascending: true });
+      if (error) { console.error("[Supa] listAllProfiles failed", error); return []; }
+      return data || [];
+    }
+    async function setUserRole(userId, role) {
+      if (!["admin","user","viewer"].includes(role)) throw new Error("invalid role");
+      const { error } = await supabase
+        .from("profiles").update({ role }).eq("user_id", userId);
+      if (error) { console.error("[Supa] setUserRole failed", error); throw error; }
+    }
+
+    // Has this row id been seen on the server (i.e., synced to tasks)?
+    function isInCloud(rowId) { return serverRows.has(rowId); }
+
+    // Proper owner check — round-trips. Cached per call site as needed.
+    async function fetchProjectOwner(projectId) {
+      const { data } = await supabase
+        .from("tasks").select("owner_user_id").eq("id", projectId).maybeSingle();
+      return data?.owner_user_id || null;
+    }
+
+    window.Supa = {
+      signIn, verifyCode, cancelCode, signOut, loadBoard,
+      queueUpsertAll, deleteRows, forceSave, forceSaveWith,
+      // sharing
+      lookupUserByEmail, listShares, addShare, updateShare, removeShare,
+      fetchProjectOwner, refreshEditableProjects, isInCloud,
+      // admin
+      listAllProfiles, setUserRole,
+      // exposed for the share UI
+      currentUserId: () => currentUserId,
+      currentRole:   () => currentRole,
+    };
+    init();
+  </script>
+
+  <!-- Project templates source — same format as references/project_templates.md.
+       Parsed at runtime by parseTemplatesMd() so the markdown stays the single
+       source of truth. Edit this block (or the .md file and paste back) to add /
+       change templates. The <script type="text/plain"> wrapper lets us keep the
+       triple-backtick fences without JS escaping. -->
+  <script type="text/plain" id="templatesMd">
+# Project Schedule Templates
+
+Four generalised templates covering the project types we typically run.
+Durations in working days. Predecessor column refers to phase IDs in the same template.
+
+---
+
+## Template A — Commercial & Industrial Solar (10–100 kW, ± Battery)
+
+Typical span: 8–16 weeks
+
+```
+Phase                                Dur (d)   Predecessor
+─────────────────────────────────────────────────────────
+1. Initiation
+   1.1 Contract award / KO              1
+   1.2 Site visit                       2-3      1.1
+   1.3 Structural assessment            3-5      1.2
+2. Design & Engineering
+   2.1 Helioscope / system sizing       3-5      1.2
+   2.2 SLD & engineering drawings       3-5      2.1
+   2.3 Mount BOM / Electrical BOM       3-5      2.2
+3. Approvals (parallel branch)
+   3.1 Grid connection application      1        2.3
+   3.2 Network approval wait            15-25    3.1
+   3.3 Council approval (if required)   5-7      2.3
+   3.4 Protection study                 5-7      2.3
+4. Procurement (parallel branch)
+   4.1 Solar panels                     10-20    2.3
+   4.2 Inverters                        10-20    2.3
+   4.3 Battery / BESS (if any)          15-25    2.3
+   4.4 Mounting / BOS                   7-15     2.3
+   4.5 GPU / DEIF / Meters              15-25    2.3
+5. Civil & Mounting
+   5.1 Site prep / WHS                  1-2      3.3 + 4.4
+   5.2 Mark out & install mount         2-4      5.1
+   5.3 Cabling / tray runs              3-5      5.2
+6. Electrical Installation
+   6.1 Panel mounting & DC wiring       3-5      5.3 + 4.1
+   6.2 Inverter install                 1-2      6.1 + 4.2
+   6.3 AC tie-in & earthing             2-3      6.2
+   6.4 Battery install                  2-3      6.3 + 4.3
+   6.5 Protection board install         1-2      6.4 + 4.5
+7. Commissioning & Testing
+   7.1 Power shutdown & meter           1        6.5
+   7.2 Monitoring system install        1        7.1
+   7.3 Utility witness test             1-3      7.2 + 3.2
+   7.4 Commissioning sign-off           1        7.3
+8. Handover
+   8.1 STC / LGC submission             1-2      7.4
+   8.2 As-built & manuals               1-2      7.4
+   8.3 Customer training                1        8.2
+   8.4 Project close-out                1-2      8.1 + 8.3
+```
+
+---
+
+## Template B — Residential Solar + Battery (5–15 kW)
+
+Typical span: 4–8 weeks
+
+```
+Phase                                Dur (d)   Predecessor
+─────────────────────────────────────────────────────────
+1. Consultation
+   1.1 Enquiry call                     1
+   1.2 Site visit & rooftop assessment  2-3      1.1
+   1.3 Quote preparation                2-3      1.2
+2. Design
+   2.1 Roof layout & shading model      3-5      1.3
+   2.2 Battery & inverter selection     3-4      2.1
+   2.3 Customer sign-off package        2        2.2
+3. Procurement (parallel)
+   3.1 Solar panels                     10-15    2.3
+   3.2 Inverter                         10-15    2.3
+   3.3 Battery                          12-18    2.3
+4. Site Prep
+   4.1 Structural & tile check          1        2.3
+   4.2 Hazard & access assessment       1        4.1
+5. Installation
+   5.1 Mounting rails & flashing        1-2      4.2 + 3.1
+   5.2 Panel placement & DC wiring      1-2      5.1
+6. Inverter & Battery
+   6.1 Inverter mount & connection      1-2      5.2 + 3.2
+   6.2 Battery install & configuration  1-2      6.1 + 3.3
+7. Grid Connection
+   7.1 Distributor approval             2-3      6.2
+   7.2 Bi-directional meter & commission 2-3     7.1
+```
+
+---
+
+## Template C — Hybrid Off-Grid (Wind + Solar + Battery)
+
+Typical span: 16–20 weeks
+
+```
+Phase                                Dur (d)   Predecessor
+─────────────────────────────────────────────────────────
+1. Feasibility
+   1.1 Wind resource measurement        10-14
+   1.2 Solar irradiance & load profile  8-12     1.1
+   1.3 Feasibility report               5-7      1.2
+2. System Design & Engineering
+   2.1 Hybrid architecture              10-12    1.3
+   2.2 Component selection              12-15    2.1
+   2.3 Engineering drawings             10-12    2.2
+3. Approvals (parallel)
+   3.1 Council DA & building permits    15-20    2.3
+   3.2 Aviation & wildlife clearance    15-20    2.3
+   3.3 Grid network agreement           15-20    2.3
+4. Procurement
+   4.1 Wind turbine                     25-30    2.3
+   4.2 Solar panels                     20-25    2.3
+   4.3 Battery bank                     20-25    2.3
+   4.4 Inverters & charge controllers   12-15    2.3
+5. Civil
+   5.1 Site preparation & access        7-10     3.1
+   5.2 Turbine tower foundation         10-12    5.1
+   5.3 Solar array footings & shed      10-12    5.1
+6. Wind Turbine Erection
+   6.1 Tower assembly                   5-7      5.2 + 4.1
+   6.2 Crane lift, nacelle & blades     7-10     6.1
+7. Solar Array Installation (parallel with 6)
+   7.1 Ground mounts                    5-7      5.3 + 4.2
+   7.2 Panel install & wiring           7-10     7.1
+8. Battery & Inverter Setup
+   8.1 Battery cabinet & racking        5-6      7.2 + 4.3
+   8.2 Hybrid inverter & controllers    5-7      8.1 + 4.4
+   8.3 Monitoring & SCADA               5-7      8.2
+9. Commissioning & Performance
+   9.1 System testing & calibration     5-7      6.2 + 8.3
+   9.2 Performance verification         4-5      9.1
+```
+
+---
+
+## Template D — Electrical / Mechanical Install (Heat Pump style)
+
+Typical span: 3–5 weeks
+
+```
+Phase                                Dur (d)   Predecessor
+─────────────────────────────────────────────────────────
+1. Site Prep
+   1.1 Brackets & trays                 2
+   1.2 Clear existing cable trays       1        1.1
+2. Cable Infrastructure
+   2.1 Install mains                    2        1.2
+   2.2 Cable tray for HP / equipment    2        1.2
+3. Deliveries (parallel)
+   3.1 Posts & HP trays                 1-2
+   3.2 Control boards                   1
+   3.3 Heat pumps                       1
+   3.4 Tanks                            1
+   3.5 Water pumps                      1
+4. Mechanical
+   4.1 Post & tray installation         2        3.1 + 2.2
+   4.2 Plumbing for HP / tanks / pumps  5        3.3 + 3.4 + 3.5
+5. Electrical Tie-in
+   5.1 Tie in mains                     2        2.1
+   5.2 HP & DB connection               2        5.1 + 3.3
+   5.3 Loggers & contactors             2        5.2 + 3.2
+6. Commissioning
+   6.1 MSB shutdown & MCCB install      1        4.1 + 5.3
+   6.2 Submain connection               1        6.1
+   6.3 Test / commission                1        6.2 + 4.2
+```
+  </script>
+
   <script>
   /* ══════════════════════════════════════════════════════════════
-     EMBEDDED DATA (replaced by build_artifact.py)
+     EMBEDDED DATA (replaced by build_artifact.py when used as a skill)
   ══════════════════════════════════════════════════════════════ */
   const EMBEDDED = /*__GANTT_DATA__*/null;
 
@@ -455,12 +1752,12 @@
 
   // ── RenewTech standard legend (10 entries) ──
   const LEGEND = {
-    scheduled_non_critical: { color: '#9DC3E6', label: 'Scheduled (non-critical)',  desc: 'Cell falls within planned start–end.' },
-    scheduled_critical:     { color: '#E06666', label: 'Scheduled (critical path)', desc: 'Same as above but slack = 0.' },
-    actual_progress:        { color: '#548235', label: 'Actual progress',           desc: 'Actual work occurred this week.' },
-    scheduled_and_actual:   { color: '#2E75B6', label: 'Scheduled + Actual',        desc: 'Planned + actual work overlap.' },
-    delay_overrun:          { color: '#C00000', label: 'Delay / overrun',           desc: 'Actual work past planned end.' },
-    late_start:             { color: '#ED7D31', label: 'Late start',                desc: 'Scheduled passed but not started.' },
+    scheduled_non_critical: { color: '#9DC3E6', label: 'Scheduled (non-critical)',  desc: 'Week falls within the planned start–end; work has not started yet.' },
+    scheduled_critical:     { color: '#E06666', label: 'Scheduled (critical path)', desc: 'Same as above but slack = 0 — any slip delays the project.' },
+    actual_progress:        { color: '#548235', label: 'Actual progress',           desc: 'Real work happened this week, outside the planned window (early or catch-up).' },
+    scheduled_and_actual:   { color: '#2E75B6', label: 'Scheduled + Actual',        desc: 'Planned and actual work overlap — on-track execution.' },
+    delay_overrun:          { color: '#C00000', label: 'Delay / overrun',           desc: 'Work has started AND we are past the scheduled end (< 100% done).' },
+    late_start:             { color: '#ED7D31', label: 'Late start',                desc: 'Scheduled start has passed but no actual work has begun (% done = 0).' },
     critical_path_row:      { color: '#FFE6E6', label: 'Critical-path row',         desc: 'Subtask with slack = 0 (★).' },
     project_header:         { color: '#1F4E78', label: 'Project header',            desc: 'Roll-up row aggregating tasks.' },
     task_summary:           { color: '#BDD7EE', label: 'Task summary',              desc: 'Roll-up row aggregating subtasks.' },
@@ -479,10 +1776,10 @@
   // Human-readable explanation of how each status is derived
   const STATUS_MEANINGS = {
     'Not Started': '% Done = 0 and scheduled start is still in the future. Nothing to worry about yet.',
-    'In Progress': 'Work is underway (% Done > 0, < 100) and the row has slack — i.e. some buffer before it would delay the project.',
-    'Critical':    'Work is underway and Slack = 0. Any delay will slip the project finish — focus management attention here.',
-    'Late Start':  'Scheduled start has passed but no work has started (% Done = 0). The row is already behind plan.',
-    'At Risk':     'Scheduled end has passed but the row is not 100% done. The project finish may slip.',
+    'In Progress': 'Work has started (actual_start set, % Done > 0, < 100) and the row has slack — some buffer before it would delay the project.',
+    'Critical':    'Work has started and Slack = 0. Any delay will slip the project finish — focus management attention here.',
+    'Late Start':  'Scheduled start has passed but no actual work has begun (no actual_start, % Done = 0). The row is already behind plan.',
+    'At Risk':     'Work has started but the scheduled end has passed and % Done < 100 — the row is in delay/overrun.',
     'Completed':   '% Done = 100. Work is finished.',
   };
 
@@ -522,18 +1819,39 @@
       FUTURE = [];
     } catch (e) { console.warn('history snapshot failed', e); }
   }
+  // queueUpsertAll only writes the rows in NODES — it never deletes rows that
+  // were removed. Undo/redo can shrink NODES (undo an add, redo a clear), so
+  // we have to diff against the prior snapshot and explicitly delete the gone
+  // ids from Supabase, otherwise the cloud silently drifts out of sync.
+  function syncDeletionsFromSnapshot(prevSnapshotJson) {
+    if (!window.Supa || !prevSnapshotJson) return;
+    try {
+      const prev = JSON.parse(prevSnapshotJson);
+      if (!Array.isArray(prev)) return;
+      const currentIds = new Set(NODES.map(n => n.id));
+      const removed = prev.map(n => n.id).filter(id => id && !currentIds.has(id));
+      if (removed.length) window.Supa.deleteRows(removed);
+    } catch (e) { console.warn('[history] deletion sync failed', e); }
+  }
+
   function undo() {
     if (!HISTORY.length) { flashHint('Nothing to undo'); return; }
-    FUTURE.push(JSON.stringify(NODES));
+    const prevSnap = JSON.stringify(NODES);
+    FUTURE.push(prevSnap);
     NODES = JSON.parse(HISTORY.pop());
-    saveLocal(); populateFilters(); render();
+    saveLocal();
+    syncDeletionsFromSnapshot(prevSnap);
+    populateFilters(); render();
     flashHint('↶ Undo');
   }
   function redo() {
     if (!FUTURE.length) { flashHint('Nothing to redo'); return; }
-    HISTORY.push(JSON.stringify(NODES));
+    const prevSnap = JSON.stringify(NODES);
+    HISTORY.push(prevSnap);
     NODES = JSON.parse(FUTURE.pop());
-    saveLocal(); populateFilters(); render();
+    saveLocal();
+    syncDeletionsFromSnapshot(prevSnap);
+    populateFilters(); render();
     flashHint('↷ Redo');
   }
   function flashHint(text) {
@@ -721,49 +2039,97 @@
   });
 
   /* ══════════════════════════════════════════════════════════════
-     PROJECT TEMPLATES — parsed from references/project_templates.md
-     and baked into the artifact by build_artifact.py.
+     PROJECT TEMPLATES — parsed at runtime from the markdown block
+     embedded above (id="templatesMd"). Same format as the original
+     references/project_templates.md. EMBEDDED.templates (legacy
+     build_artifact.py path) is still honored if present.
   ══════════════════════════════════════════════════════════════ */
-  const TEMPLATES = (EMBEDDED && EMBEDDED.templates) || {};
-
-  /* CPM forward + backward pass — ported from scripts/scheduler.py.
-     Each template task: { tid, name, dur:[lo,hi], preds:[tid,...] }
-     Returns ES/EF/LS/LF in working-day offsets + a dateAt(offset) helper. */
-  function solveCPM(tasks, projectStartISO, workingDaysOnly) {
-    const byId = Object.fromEntries(tasks.map(t => [t.tid, t]));
-    const inDeg = {}, succ = {};
-    tasks.forEach(t => { inDeg[t.tid] = (t.preds || []).length; succ[t.tid] = []; });
-    tasks.forEach(t => (t.preds || []).forEach(p => { if (succ[p]) succ[p].push(t.tid); }));
-    const queue = tasks.filter(t => inDeg[t.tid] === 0).map(t => t.tid);
-    const order = [];
-    while (queue.length) {
-      const u = queue.shift(); order.push(u);
-      succ[u].forEach(v => { inDeg[v]--; if (inDeg[v] === 0) queue.push(v); });
+  function parseTemplatesMd(text) {
+    const out = {};
+    if (!text) return out;
+    // Locate each "## Template X — Name" header. Allow either em-dash or hyphen.
+    const headerRe = /\n##\s*Template\s+([A-Z])\s*[—\-]\s*([^\n]+)\n/g;
+    const heads = [];
+    let m;
+    while ((m = headerRe.exec(text)) !== null) {
+      heads.push({ key: m[1], name: m[2].trim(), headerStart: m.index, bodyStart: headerRe.lastIndex });
     }
-    if (order.length < tasks.length) throw new Error('Template has a dependency cycle');
+    for (let i = 0; i < heads.length; i++) {
+      const h = heads[i];
+      const bodyEnd = (i + 1 < heads.length) ? heads[i + 1].headerStart : text.length;
+      const body = text.slice(h.bodyStart, bodyEnd);
+      const spanM = body.match(/Typical span:\s*(.+)/);
+      const span = spanM ? spanM[1].trim() : '';
+      const codeM = body.match(/```[a-zA-Z]*\n([\s\S]*?)\n```/);
+      if (!codeM) continue;
+      const tasks = [];
+      const phases = {};
+      for (const line of codeM[1].split('\n')) {
+        const stripped = line.trim();
+        if (!stripped || stripped.startsWith('Phase') || stripped.startsWith('─')) continue;
+        // Phase header: "1. Initiation" — single dot, no second numeric segment.
+        const phM = stripped.match(/^(\d+)\.\s+(.+)$/);
+        if (phM && !/^\d+\.\d+/.test(stripped)) {
+          phases[phM[1]] = phM[2].trim();
+          continue;
+        }
+        // Task line: leading spaces, "1.1 Name … Dur [Preds]"
+        const head = line.match(/^\s+(\d+\.\d+)\s+(.+)$/);
+        if (!head) continue;
+        const tid = head[1];
+        const rest = head[2];
+        const durM = rest.match(/\s+(\d+(?:-\d+)?)(?:\s+([\d.,;+\s]+))?\s*$/);
+        if (!durM) continue;
+        const tname = rest.slice(0, durM.index).trim();
+        const durStr = durM[1];
+        const predStr = (durM[2] || '').trim();
+        let dur;
+        if (durStr.includes('-')) {
+          const [lo, hi] = durStr.split('-').map(Number);
+          dur = [lo, hi];
+        } else {
+          const d = parseInt(durStr, 10);
+          dur = [d, d];
+        }
+        const preds = predStr.match(/\d+\.\d+/g) || [];
+        tasks.push({ tid, name: tname, dur, preds });
+      }
+      out[h.key] = { name: h.name, span, tasks, phases };
+    }
+    return out;
+  }
 
-    // Forward — use upper-bound duration (conservative for committed dates)
-    const ES = {}, EF = {};
-    order.forEach(u => {
-      const d = byId[u].dur[1];
-      const preds = byId[u].preds || [];
-      ES[u] = preds.length ? Math.max(...preds.map(p => EF[p])) : 0;
-      EF[u] = ES[u] + d;
-    });
-    const T = Math.max(0, ...Object.values(EF));
+  const TEMPLATES = (EMBEDDED && EMBEDDED.templates && Object.keys(EMBEDDED.templates).length)
+    ? EMBEDDED.templates
+    : parseTemplatesMd(document.getElementById('templatesMd')?.textContent || '');
 
-    // Backward — for slack
-    const LS = {}, LF = {};
-    [...order].reverse().forEach(u => {
-      const d = byId[u].dur[1];
-      const outs = succ[u];
-      LF[u] = outs.length ? Math.min(...outs.map(v => LS[v])) : T;
-      LS[u] = LF[u] - d;
-    });
+  /* CPM forward + backward pass — thin adapter over scripts/scheduler.js.
+     Translates the template task shape { tid, name, dur:[lo,hi], preds:[tid,...] }
+     into the Scheduler module's input shape, then re-shapes the result so
+     existing callers (loadFromTemplate) keep working unchanged.
 
-    const slack = Object.fromEntries(tasks.map(t => [t.tid, LS[t.tid] - ES[t.tid]]));
+     The underlying module supports FS/SS/FF edges with lag and incremental
+     recompute — not used here yet, but available via window.Scheduler for
+     future features (e.g. delay-a-task without recomputing the whole board). */
+  function solveCPM(tasks, projectStartISO, workingDaysOnly) {
+    if (!window.Scheduler) {
+      throw new Error('Scheduler module not loaded — check scripts/scheduler.js path');
+    }
+    // Translate legacy task shape → Scheduler input shape.
+    // Use upper-bound duration (dur[1]) to keep the conservative behaviour
+    // the previous inline solver had for committed dates.
+    const translated = tasks.map(t => ({
+      id: t.tid,
+      name: t.name,
+      duration: t.dur[1],
+      predecessors: t.preds || [],
+    }));
     const start = new Date(projectStartISO);
-    const offsetToDate = (offset) => {
+    const r = window.Scheduler.schedule(translated, start, { workingDaysOnly });
+
+    // Legacy callers expect a dateAt(offset) helper; rebuild it here so the
+    // adapter is fully self-describing.
+    const dateAt = (offset) => {
       if (!workingDaysOnly) {
         const d = new Date(start); d.setDate(d.getDate() + offset); return d;
       }
@@ -775,7 +2141,12 @@
       }
       return d;
     };
-    return { ES, EF, LS, LF, slack, T, dateAt: offsetToDate };
+    return {
+      ES: r.ES, EF: r.EF, LS: r.LS, LF: r.LF,
+      slack: r.slack,
+      T: r.projectSpanT,
+      dateAt,
+    };
   }
 
   function openTemplatePicker() {
@@ -1156,6 +2527,61 @@
   // Sale Price lives only on project rows — don't roll up across hierarchy
   const eSale = n => parseFloat(n.sale_price) || 0;
 
+  /* ── % Done roll-up ──
+     Leaves return their own stored value (clamped to 0–100).
+     Parents return the est_cost-weighted average of their children. If no
+     children have est_cost, falls back to a simple average so the value is
+     never NaN. % Done is only editable on subtasks; tasks and projects derive. */
+  // Extracts plain task IDs from a predecessors string. Predecessors may be
+  // stored either bare ("P1-T1-S1") or with type/lag suffixes ("P1-T1-S1FS+2"),
+  // so we match the longest "<letter><digits>(-<letter><digits>)*" prefix.
+  function predecessorIds(predStr) {
+    if (!predStr) return [];
+    return String(predStr).split(/[,;]/).map(s => s.trim()).filter(Boolean).map(raw => {
+      const m = raw.match(/^[A-Za-z]\d+(-[A-Za-z]\d+)*/);
+      return m ? m[0] : raw;
+    });
+  }
+
+  // True when every predecessor of `node` is effectively 100% done. _depth
+  // guards against cycles in the predecessor graph (caps recursion at 20).
+  function predecessorsComplete(node, _depth) {
+    _depth = _depth || 0;
+    if (_depth > 20) return true;            // cycle: don't block indefinitely
+    const ids = predecessorIds(node.predecessors);
+    for (const pid of ids) {
+      const pred = NODES.find(x => x.id === pid);
+      if (!pred) continue;                    // unknown predecessor → ignore
+      if (ePercentDone(pred, _depth + 1) < 100) return false;
+    }
+    return true;
+  }
+
+  function ePercentDone(node, _depth) {
+    _depth = _depth || 0;
+    if (_depth > 20) return 0;                // cycle defense
+    const kids = childrenOf(node);
+    if (kids.length === 0) {
+      // Predecessor gate — a subtask cannot have started until every
+      // predecessor is at 100%. Effective % is forced to 0 until then.
+      if (!predecessorsComplete(node, _depth + 1)) return 0;
+      const v = parseFloat(node.percent_done);
+      if (isNaN(v)) return 0;
+      return Math.max(0, Math.min(100, v));
+    }
+    let totalWeight = 0;
+    let weightedSum = 0;
+    let plainSum    = 0;
+    for (const k of kids) {
+      const pd = ePercentDone(k, _depth + 1);
+      const w  = eEst(k);
+      plainSum += pd;
+      if (w > 0) { totalWeight += w; weightedSum += w * pd; }
+    }
+    if (totalWeight > 0) return weightedSum / totalWeight;
+    return plainSum / kids.length;
+  }
+
   /* ── Date roll-up ──
      Parent rows show min/max of their descendants' dates (recursive).
      A leaf row uses its own stored values. Mirrors getEffective() for costs. */
@@ -1213,18 +2639,28 @@
     if (isNaN(e) || e <= 0) return '';
     return +(e / (1 - margin)).toFixed(2);
   }
+  // Status rules (mirrors cellColorForWeek):
+  //   Completed   — % done = 100.
+  //   Late Start  — scheduled start has passed, no actual_start, 0% done.
+  //   At Risk     — work has started AND we're past the scheduled end.
+  //   Critical    — work in progress on the critical path (slack = 0).
+  //   In Progress — work in progress with slack > 0.
+  //   Not Started — % done = 0 and scheduled start is still in the future.
   function computeStatus(node) {
     const today = new Date(); today.setHours(0,0,0,0);
-    const pd = parseFloat(node.percent_done);
-    if (!isNaN(pd) && pd >= 100) return 'Completed';
+    const pd = ePercentDone(node);
+    if (pd >= 100) return 'Completed';
+    // Use rolled-up dates so a parent's status reflects its earliest/latest child.
+    const rng = eDateRange(node);
+    const schedStart  = rng.schedStart  || node.sched_start;
+    const schedEnd    = rng.schedEnd    || node.sched_end;
+    const actualStart = rng.actualStart || node.actual_start;
     if (isNaN(pd) || pd <= 0) {
-      // Not started — check if sched_start has passed (late start)
-      if (node.sched_start && new Date(node.sched_start) < today) return 'Late Start';
+      if (schedStart && new Date(schedStart) < today) return 'Late Start';
       return 'Not Started';
     }
-    // In progress — check delay
-    if (node.sched_end && new Date(node.sched_end) < today) return 'At Risk';
-    // Otherwise: critical path if slack=0, otherwise in progress
+    // Work is in progress (pd > 0). If we're past the scheduled end, the row is delayed.
+    if (schedEnd && actualStart && new Date(schedEnd) < today) return 'At Risk';
     return isCriticalPath(node) ? 'Critical' : 'In Progress';
   }
   // Cost Variance = Cost-to-Date − Estimated (uses rolled-up values for parents)
@@ -1247,31 +2683,49 @@
   function colorFor(node) {
     return STATUS_COLORS[computeStatus(node)] || '#6b7280';
   }
-  // Per-cell color for the Excel calendar block — runs for every (row, week)
+  // Per-cell color for the Excel calendar block — runs for every (row, week).
+  // Uses rolled-up dates so a project/task row spans the earliest→latest of
+  // its descendants, matching how the in-app bar is drawn.
+  //
+  // Color rules, in order:
+  //   1. Delay/overrun  — work has STARTED (actual_start set) and we're past
+  //                       the scheduled end, with progress < 100%.
+  //   2. Late start     — scheduled start has passed, NO actual work began
+  //                       (no actual_start, % done = 0).
+  //   3. Sched + Actual — cell is in both ranges (on-track execution).
+  //   4. Actual only    — work happened outside the planned window (early
+  //                       start, or post-schedule catch-up).
+  //   5. Scheduled only — planned but not yet started.
   function cellColorForWeek(node, weekStart, weekEnd, today) {
-    const ns = node.sched_start ? new Date(node.sched_start) : null;
-    const ne = node.sched_end   ? new Date(node.sched_end)   : null;
-    const as = node.actual_start ? new Date(node.actual_start) : null;
-    const ae = node.actual_end   ? new Date(node.actual_end)   : null;
+    const rng = eDateRange(node);
+    const ns = rng.schedStart   ? new Date(rng.schedStart)   : null;
+    const ne = rng.schedEnd     ? new Date(rng.schedEnd)     : null;
+    const as = rng.actualStart  ? new Date(rng.actualStart)  : null;
+    const ae = rng.actualEnd    ? new Date(rng.actualEnd)    : null;
     const critical = isCriticalPath(node);
+    const pd       = ePercentDone(node);
 
     const overlap = (a, b, c, d) => a && b && c && d && a <= d && b >= c;
     const inSched  = overlap(ns, ne, weekStart, weekEnd);
     const inActual = overlap(as, ae || today, weekStart, weekEnd);
 
-    // Delay / overrun: actual work past planned end, OR scheduled overdue with work still going
-    if (ne && inActual && weekStart > ne)            return LEGEND.delay_overrun.color;
-    if (ne && inSched  && weekStart > ne)            return LEGEND.delay_overrun.color;
+    // 1. Delay/overrun — needs work to have actually started.
+    if (ne && as && weekStart > ne && pd < 100) return LEGEND.delay_overrun.color;
 
-    // Late start: schedule has begun, no actual work, not yet started
-    if (ns && weekStart >= ns && !as && (!node.percent_done || +node.percent_done === 0))
-                                                      return LEGEND.late_start.color;
+    // 2. Late start — scheduled by now, nothing started.
+    if (ns && weekStart >= ns && !as && pd === 0) return LEGEND.late_start.color;
 
+    // 3. Sched + Actual overlap.
     if (inSched && inActual) return LEGEND.scheduled_and_actual.color;
-    if (inActual)            return LEGEND.actual_progress.color;
-    if (inSched)             return critical ? LEGEND.scheduled_critical.color
-                                             : LEGEND.scheduled_non_critical.color;
-    return null;  // no fill
+
+    // 4. Actual only.
+    if (inActual) return LEGEND.actual_progress.color;
+
+    // 5. Scheduled only.
+    if (inSched) return critical ? LEGEND.scheduled_critical.color
+                                 : LEGEND.scheduled_non_critical.color;
+
+    return null;
   }
   function fmtMoney(v) {
     const n = parseFloat(v);
@@ -1283,8 +2737,28 @@
   /* ══════════════════════════════════════════════════════════════
      PERSISTENCE
   ══════════════════════════════════════════════════════════════ */
+  // Sync parent rows' stored dates and % done to the rollups of their
+  // descendants so what's written to localStorage + Supabase matches what the
+  // UI shows. Without this, parents drift whenever a child is edited — display
+  // would be correct (via eDateRange / ePercentDone) but stored rows stale.
+  function recomputeParentRollups() {
+    NODES.forEach(n => {
+      if (childrenOf(n).length === 0) return;
+      const r = eDateRange(n);
+      n.sched_start  = r.schedStart  || '';
+      n.sched_end    = r.schedEnd    || '';
+      n.actual_start = r.actualStart || '';
+      n.actual_end   = r.actualEnd   || '';
+      const pd = ePercentDone(n);
+      // Store as a number with up to 1 decimal — keeps the DB column tidy
+      // while preserving precision for weighted averages.
+      n.percent_done = Math.round(pd * 10) / 10;
+    });
+  }
+
   function saveLocal() {
     try {
+      recomputeParentRollups();
       localStorage.setItem(LS_KEY, JSON.stringify({NODES, SOURCE, MAX_SLACK_CAP}));
       dirty = true;
       const badge = document.getElementById('dirtyBadge');
@@ -1293,6 +2767,8 @@
       badge.style.borderColor = '#fde68a';
       badge.textContent = 'Unsaved edits';
       badge.style.display = '';
+      // Push to Supabase if signed in (role-gated inside the module)
+      if (window.Supa) window.Supa.queueUpsertAll(NODES);
     } catch(e) { console.warn('localStorage save failed', e); }
   }
   function loadLocal() {
@@ -1304,13 +2780,51 @@
       return parsed;
     } catch(e) { return null; }
   }
-  function resetAll() {
-    if (dirty && !confirm('Discard local edits and reload from the source?')) return;
-    localStorage.removeItem(LS_KEY);
-    dirty = false;
-    document.getElementById('dirtyBadge').style.display = 'none';
-    location.reload();
+  function clearGantt() {
+    if (!NODES.length) { flashHint('Chart is already empty'); return; }
+    // currentUserId lives inside the Supabase module — peek at the auth bar
+    // instead to decide whether to warn about cloud deletion.
+    const signedIn = document.getElementById('auth-signedin')?.style.display !== 'none';
+    if (!confirm(`Clear the entire gantt chart? This deletes all ${NODES.length} row(s)` +
+                 (signedIn ? ' from the cloud as well.' : '.') +
+                 '\n\nUndo with Ctrl/Cmd+Z while this tab stays open.'))
+      return;
+
+    pushHistory();
+    const allIds = NODES.map(n => n.id);
+    NODES.length = 0;
+    selectedProjects.clear();
+    selectedOwners.clear();
+
+    // Persist locally (also wipes localStorage to an empty NODES array).
+    saveLocal();
+
+    // If signed in, hard-delete from Supabase so the next load doesn't repopulate.
+    if (window.Supa && allIds.length) {
+      window.Supa.deleteRows(allIds);
+    }
+
+    populateFilters();
+    render();
+    flashHint(`🗑 Cleared ${allIds.length} row${allIds.length === 1 ? '' : 's'}`);
   }
+
+  /* Accessor used by the Supabase module to replace NODES wholesale on cloud load.
+     Mutates the underlying array in place so the script-local NODES binding stays
+     in sync (let-declared NODES is not on window, so we can't just reassign it). */
+  window.replaceNodes = function(arr) {
+    NODES.length = 0;
+    for (const n of arr) NODES.push(n);
+    try { populateFilters(); } catch(_) {}
+    try { render(); } catch(_) {}
+  };
+  // Live reference so devtools / window.Supa.forceSave() can read current NODES.
+  Object.defineProperty(window, "__NODES__", { get: () => NODES });
+  // Re-render hook called by Realtime when remote updates land.
+  window.__rerender = () => {
+    try { populateFilters(); } catch(_) {}
+    try { render(); } catch(_) {}
+  };
 
   /* ══════════════════════════════════════════════════════════════
      ID HELPERS — enforce P / P-T / P-T-S convention
@@ -1346,6 +2860,12 @@
   /* ══════════════════════════════════════════════════════════════
      TREE LAYOUT — flatten honoring collapse state
   ══════════════════════════════════════════════════════════════ */
+  let projectSearchQuery = '';
+  function onProjectSearchInput() {
+    projectSearchQuery = (document.getElementById('projSearch')?.value || '').toLowerCase().trim();
+    render();
+  }
+
   function visibleTree() {
     const sortKey = document.getElementById('fSort').value;
     const fStatus = document.getElementById('fStatus').value;
@@ -1372,19 +2892,48 @@
     // Determine root project ID for each node (climbs ancestors)
     const projectOf = (id) => id.split('-')[0];
 
+    // When the user types in the project-search box, build a set of ids that
+    // should be visible: every node whose name OR id contains the query, plus
+    // all its ancestors (so the hierarchy stays intact) and all its descendants
+    // (so matching a project still shows its tasks/subtasks).
+    let searchInclude = null;
+    if (projectSearchQuery) {
+      searchInclude = new Set();
+      const matches = NODES.filter(n =>
+        (n.name || '').toLowerCase().includes(projectSearchQuery) ||
+        (n.id   || '').toLowerCase().includes(projectSearchQuery)
+      );
+      const addWithAncestors = (id) => {
+        let cur = id;
+        while (cur) { searchInclude.add(cur); cur = parentOf(cur); }
+      };
+      const addDescendants = (id) => {
+        const stack = [id];
+        while (stack.length) {
+          const top = stack.pop();
+          searchInclude.add(top);
+          (byParent[top] || []).forEach(c => stack.push(c.id));
+        }
+      };
+      matches.forEach(m => { addWithAncestors(m.id); addDescendants(m.id); });
+    }
+
     const out = [];
     const walk = (parentId) => {
       const kids = sortNodes(byParent[parentId || '__root__'] || []);
       kids.forEach(n => {
         const projId = projectOf(n.id);
-        // Project filter: empty set → show nothing; otherwise require membership
-        if (!selectedProjects.has(projId)) return;
+        // Search filter — when active, replaces the project-set filter so the
+        // typed query always shows its results regardless of the Projects ▾ dropdown.
+        if (searchInclude && !searchInclude.has(n.id)) return;
+        if (!searchInclude && !selectedProjects.has(projId)) return;
         // Status filter
         if (fStatus && computeStatus(n) !== fStatus) { walk(n.id); return; }
         // Owner filter: hide this row if owner doesn't match selection (keep walking children)
         if (n.owner && !selectedOwners.has(n.owner)) { walk(n.id); return; }
         out.push(n);
-        if (!n.collapsed) walk(n.id);
+        // While a search is active, force-expand so matching descendants are visible.
+        if (!n.collapsed || searchInclude) walk(n.id);
       });
     };
     walk(null);
@@ -1475,20 +3024,22 @@
       if (useStart && useEnd) {
         const sp = pct(useStart), ep = pct(useEnd), w = Math.max(0.5, ep - sp);
         const color = colorFor(n);
-        const pd = Math.max(0, Math.min(100, parseFloat(n.percent_done) || 0));
+        const pd = ePercentDone(n);
+        const pdLabel = pd % 1 === 0 ? pd.toFixed(0) : pd.toFixed(1);
         barsHtml += `
           <div class="g-bar is-${type[0]}" id="bar-${ri}" data-ri="${ri}" data-nodeidx="${nodeIdx}"
                style="left:${sp}%;width:${w}%;background:${color};"
                onmouseenter="tipShow(event,${nodeIdx})" onmouseleave="tipHide()">
             <div class="progress-fill" style="width:${100 - pd}%; right:0; left:auto; background:rgba(255,255,255,.55);"></div>
             <div class="rh rh-left"  onmousedown="dragStart(event,'left',${ri},${nodeIdx})"></div>
-            <span class="bar-label">${esc(n.id)} · ${esc(n.percent_done || 0)}%</span>
+            <span class="bar-label">${esc(n.id)} · ${pdLabel}%</span>
             <div class="rh rh-right" onmousedown="dragStart(event,'right',${ri},${nodeIdx})"></div>
           </div>`;
       }
 
       const ownerLabel = n.owner ? `👤 ${esc(n.owner)}` : '';
-      const pdLabel    = (n.percent_done != null && n.percent_done !== '') ? `${n.percent_done}% done` : '';
+      const pdEff      = ePercentDone(n);
+      const pdLabel    = `${pdEff % 1 === 0 ? pdEff.toFixed(0) : pdEff.toFixed(1)}% done${hasKids ? ' ⌃' : ''}`;
       // Cost chips — Sale only on projects. Estimated Cost is the budget baseline.
       const effEst  = eEst(n);
       const effSpent= eSpent(n);
@@ -1796,8 +3347,7 @@
     const current = NODES.filter(n => {
       if (!n.sched_start || !n.sched_end) return false;
       const s = new Date(n.sched_start), e = new Date(n.sched_end);
-      const pd = parseFloat(n.percent_done) || 0;
-      return s <= today && today <= e && pd < 100;
+      return s <= today && today <= e && ePercentDone(n) < 100;
     });
 
     if (current.length === 0) {
@@ -1876,10 +3426,172 @@
     if (descendants.length) msg += `\n\nThis will also delete ${descendants.length} child row${descendants.length === 1 ? '' : 's'} under it.`;
     if (!confirm(msg)) return;
     pushHistory();
+
+    const idsToDelete = [n.id, ...descendants.map(x => x.id)];
+
     NODES = NODES.filter(x => x !== n && !x.id.startsWith(n.id + '-'));
+
+    if (window.Supa) {
+      window.Supa.deleteRows(idsToDelete);
+    }
+
     saveLocal();
     populateFilters();
     render();
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     CLOUD SAVE BUTTON + MINE FILTER
+  ══════════════════════════════════════════════════════════════ */
+  // Manual "Save" — force-flushes pending edits to Supabase right now.
+  // Auto-save still runs in the background; this just bypasses the debounce.
+  async function manualCloudSave() {
+    const btn = document.getElementById('saveBtn');
+    if (!window.Supa || !window.Supa.forceSave) {
+      flashHint('Not signed in');
+      return;
+    }
+    btn.classList.add('is-syncing');
+    btn.classList.remove('is-dirty');
+    btn.textContent = '⟳ Saving…';
+    try {
+      await window.Supa.forceSave();
+      btn.textContent = '✓ Saved';
+      btn.classList.remove('is-syncing', 'is-dirty');
+      setTimeout(() => { btn.textContent = '💾 Save'; }, 1200);
+    } catch (e) {
+      btn.textContent = '⚠ Failed';
+      btn.classList.remove('is-syncing');
+      btn.classList.add('is-dirty');
+      console.error('[Supa] manualCloudSave failed:', e);
+      setTimeout(() => { btn.textContent = '💾 Save'; }, 2000);
+    }
+  }
+
+  // Update Save button visual state based on whether there are unsaved edits.
+  // Wired off the dirtyBadge — when it says "Unsaved edits" we mark the
+  // button amber; when it says "Synced ✓" we clear it.
+  function refreshSaveBtnFromBadge() {
+    const btn = document.getElementById('saveBtn');
+    const badge = document.getElementById('dirtyBadge');
+    if (!btn) return;
+    if (!badge || badge.style.display === 'none') {
+      btn.classList.remove('is-dirty');
+    } else if (/Unsaved/i.test(badge.textContent || '')) {
+      btn.classList.add('is-dirty');
+    } else {
+      btn.classList.remove('is-dirty');
+    }
+  }
+  // Poll on a slow interval — cheap, and avoids wiring into every saveLocal site.
+  setInterval(refreshSaveBtnFromBadge, 500);
+
+  // ── Mine filter ──
+  // When active, the project filter is constrained to projects the current
+  // user can edit (owns or has an edit-share on). We piggy-back on the
+  // existing selectedProjects machinery: clicking Mine *sets* selectedProjects
+  // to the editable subset; clicking it again clears back to all.
+  let mineFilterActive = false;
+  // Populated from Supabase on init/auth-change; empty Set = "no edit access".
+  window.__editableProjectIds = new Set();
+
+  function toggleMineFilter() {
+    mineFilterActive = !mineFilterActive;
+    const btn = document.getElementById('mineBtn');
+    if (mineFilterActive) {
+      selectedProjects.clear();
+      for (const pid of window.__editableProjectIds) selectedProjects.add(pid);
+      btn.classList.add('is-active');
+      flashHint(`Mine: ${window.__editableProjectIds.size} project(s) you can edit`);
+    } else {
+      // Restore: select everything
+      NODES.filter(n => typeFromId(n.id) === 'project').forEach(n => selectedProjects.add(n.id));
+      btn.classList.remove('is-active');
+      flashHint('All projects');
+    }
+    updateFilterButtonLabels();
+    render();
+  }
+
+  // ── Manage Users (admin only) ──
+  // The button is hidden until we detect the current role is admin. We poll
+  // on the same cheap interval as the save-button updater so it appears
+  // shortly after sign-in, with no special wiring.
+  function refreshAdminControls() {
+    const btn = document.getElementById('usersBtn');
+    if (!btn) return;
+    const role = window.Supa && window.Supa.currentRole ? window.Supa.currentRole() : null;
+    btn.style.display = role === 'admin' ? '' : 'none';
+  }
+  setInterval(refreshAdminControls, 1000);
+
+  let _usersCache = [];   // cached profiles for client-side search
+
+  async function openManageUsersModal() {
+    const role = window.Supa.currentRole();
+    if (role !== 'admin') { flashHint('Admins only'); return; }
+    document.getElementById('usersModal').style.display = 'flex';
+    document.getElementById('usersSearch').value = '';
+    _usersCache = await window.Supa.listAllProfiles();
+    renderUsersList();
+  }
+  function closeManageUsersModal() {
+    document.getElementById('usersModal').style.display = 'none';
+  }
+  function renderUsersList() {
+    const wrap = document.getElementById('usersList');
+    const q    = (document.getElementById('usersSearch')?.value || '').toLowerCase().trim();
+    const me   = window.Supa.currentUserId();
+    const rows = _usersCache.filter(p => !q || (p.email || '').toLowerCase().includes(q));
+    if (!rows.length) {
+      wrap.innerHTML = `<div style="padding:14px; color:#9ca3af;">${q ? 'No matches.' : 'No users yet.'}</div>`;
+      return;
+    }
+    wrap.innerHTML = `
+      <table style="width:100%; font-size:12px; border-collapse:collapse;">
+        <thead><tr style="background:#f9fafb; text-align:left;">
+          <th style="padding:8px 10px;">Email</th>
+          <th style="padding:8px 10px; width:140px;">Role</th>
+        </tr></thead>
+        <tbody>
+          ${rows.map(p => {
+            const isMe = p.user_id === me;
+            return `
+              <tr style="border-top:1px solid #f3f4f6;">
+                <td style="padding:6px 10px;">
+                  ${esc(p.email || '(no email)')}
+                  ${isMe ? '<span style="font-size:10px; color:#0e7490; margin-left:6px;">(you)</span>' : ''}
+                </td>
+                <td style="padding:6px 10px;">
+                  <select onchange="changeUserRole('${esc(p.user_id)}', this.value)" ${isMe ? 'data-self="1"' : ''}>
+                    <option value="admin"  ${p.role === 'admin'  ? 'selected' : ''}>admin</option>
+                    <option value="user"   ${p.role === 'user'   ? 'selected' : ''}>user</option>
+                    <option value="viewer" ${p.role === 'viewer' ? 'selected' : ''}>viewer</option>
+                  </select>
+                </td>
+              </tr>`;
+          }).join('')}
+        </tbody>
+      </table>`;
+  }
+  async function changeUserRole(userId, role) {
+    const me = window.Supa.currentUserId();
+    if (userId === me && role !== 'admin') {
+      if (!confirm("Demote yourself from admin? You'll lose access to this panel.")) {
+        renderUsersList();   // revert dropdown
+        return;
+      }
+    }
+    try {
+      await window.Supa.setUserRole(userId, role);
+      const p = _usersCache.find(x => x.user_id === userId);
+      if (p) p.role = role;
+      flashHint('Role updated');
+    } catch (e) {
+      flashHint('Update failed — check console');
+      _usersCache = await window.Supa.listAllProfiles();
+      renderUsersList();
+    }
   }
 
   /* ══════════════════════════════════════════════════════════════
@@ -1897,12 +3609,21 @@
     sorted.forEach(n => {
       const variance = computeVariance(n);
       const margin   = computeMargin(n);
+      const pdEff = ePercentDone(n);
+      const rng   = eDateRange(n);
+      const isParent = childrenOf(n).length > 0;
       const row = {
         id: n.id, name: n.name, owner: n.owner, predecessors: n.predecessors,
-        sched_start: n.sched_start, sched_end: n.sched_end,
-        actual_start: n.actual_start, actual_end: n.actual_end,
-        slack: n.slack, percent_done: n.percent_done,
-        est_cost: n.est_cost, cost_to_date: n.cost_to_date,
+        // For parents export the rolled-up dates / % / costs so the CSV matches
+        // what's on screen (rather than the row's possibly-stale stored values).
+        sched_start:  isParent ? rng.schedStart   : n.sched_start,
+        sched_end:    isParent ? rng.schedEnd     : n.sched_end,
+        actual_start: isParent ? rng.actualStart  : n.actual_start,
+        actual_end:   isParent ? rng.actualEnd    : n.actual_end,
+        slack: n.slack,
+        percent_done: pdEff,
+        est_cost:     isParent ? eEst(n)   : n.est_cost,
+        cost_to_date: isParent ? eSpent(n) : n.cost_to_date,
         cost_variance: variance,
         sale_price: n.sale_price,
         margin: margin,
@@ -1985,13 +3706,13 @@
     const dd = deltaDays >= 0 ? `+${deltaDays}d` : `${deltaDays}d`;
 
     if (drag.isParent && drag.childSnapshot) {
-      // Apply uniform shift to every descendant's actual + sched dates
+      // Dragging shifts only actual_* — the SCHEDULE is the plan, set when the
+      // row is created, and stays put unless explicitly edited in the modal.
+      // Actual_* tracks what really happened (or is currently happening).
       const shift = (iso) => iso ? fmtDate(addDays(new Date(iso), deltaDays)) : iso;
       drag.childSnapshot.forEach(snap => {
         snap.ref.actual_start = shift(snap.origActualStart);
         snap.ref.actual_end   = shift(snap.origActualEnd);
-        snap.ref.sched_start  = shift(snap.origSchedStart);
-        snap.ref.sched_end    = shift(snap.origSchedEnd);
       });
       // Update the parent bar from new rollup
       const range = eDateRange(n);
@@ -2094,7 +3815,46 @@
       }
     }
     const pdInput = document.getElementById('m-percent-done');
-    pdInput.value = clampPercent(n.percent_done ?? '');
+    // % Done lock states:
+    //   Parent      → derived from children (read-only, grey).
+    //   Leaf, gated → predecessors not yet 100% (read-only at 0, amber).
+    //   Leaf, free  → editable.
+    {
+      const idForPdCheck = n.id || '';
+      const isParentForPd = NODES.some(x => parentOf(x.id) === idForPdCheck && idForPdCheck);
+
+      // Reuse / create the gate-explanation note element.
+      let gateNote = document.getElementById('m-pd-gate-note');
+      if (!gateNote) {
+        gateNote = document.createElement('div');
+        gateNote.id = 'm-pd-gate-note';
+        gateNote.style.cssText = 'font-size:10px; margin-top:2px;';
+        pdInput.parentNode.appendChild(gateNote);
+      }
+      gateNote.style.display = 'none';
+
+      if (isParentForPd) {
+        const pdEff = ePercentDone({ ...n, id: idForPdCheck });
+        pdInput.value = pdEff % 1 === 0 ? pdEff.toFixed(0) : pdEff.toFixed(1);
+        pdInput.readOnly = true;
+        pdInput.style.background = '#f9fafb';
+        pdInput.style.color = '#6b7280';
+      } else if (!predecessorsComplete({ ...n, id: idForPdCheck })) {
+        // Predecessor gate: lock at 0 until all predecessors finish.
+        pdInput.value = 0;
+        pdInput.readOnly = true;
+        pdInput.style.background = '#fef3c7';
+        pdInput.style.color = '#92400e';
+        gateNote.textContent = '🔒 Locked at 0 — predecessors must reach 100% before this can start.';
+        gateNote.style.color = '#92400e';
+        gateNote.style.display = '';
+      } else {
+        pdInput.value = clampPercent(n.percent_done ?? '');
+        pdInput.readOnly = false;
+        pdInput.style.background = 'white';
+        pdInput.style.color = '#111827';
+      }
+    }
     // Live-clamp on input so the user sees the value snap to range immediately
     pdInput.oninput = () => {
       const v = parseFloat(pdInput.value);
@@ -2113,6 +3873,35 @@
 
     // Sale/margin section is only relevant for projects
     saleSection.style.display = isProject ? '' : 'none';
+
+    // Sharing section: visible only when editing an EXISTING project row that
+    // the current user owns (or is admin). Hidden for tasks/subtasks and for
+    // brand-new projects (no row yet so no shares to manage).
+    {
+      const shareSection = document.getElementById('m-share-section');
+      const isExistingProject = isProject && modalIdx >= 0;
+      shareSection.style.display = 'none';
+      setShareStatus('', '');
+      clearShareSelected();
+      const searchIn = document.getElementById('m-share-search');
+      if (searchIn) searchIn.value = '';
+      closeSharePicker();
+      if (isExistingProject && window.Supa) {
+        // Async ownership check; show section + render shares if allowed.
+        (async () => {
+          const me   = window.Supa.currentUserId();
+          const role = window.Supa.currentRole();
+          if (!me) return;
+          const owner = await window.Supa.fetchProjectOwner(idForCheck);
+          const canManage = (role === 'admin') || (owner && owner === me);
+          if (!canManage) return;
+          shareSection.style.display = '';
+          shareSection.dataset.projectId = idForCheck;
+          await loadShareUserPool(idForCheck);
+          await refreshShareList(idForCheck);
+        })();
+      }
+    }
 
     if (isParent) {
       const tempNode = { ...n, id: idForCheck };
@@ -2175,6 +3964,202 @@
     document.getElementById('m-est-cost').oninput   = refreshComputedFields;
     document.getElementById('m-cost-date').oninput  = refreshComputedFields;
     document.getElementById('m-sale-price').oninput = refreshComputedFields;
+  }
+
+  // ── Sharing UI handlers ──
+  // In a classic <script>, function declarations at top level are already
+  // global (window.refreshShareList === refreshShareList), so the Supabase
+  // <script type="module"> can call window.refreshShareList(pid) directly.
+  // Do NOT reassign window.refreshShareList to a wrapper — that overwrites
+  // the local binding too and causes infinite self-recursion.
+  async function refreshShareList(projectId) {
+    const wrap = document.getElementById('m-share-list');
+    if (!wrap) return;
+    wrap.innerHTML = '<div style="color:#9ca3af;">Loading…</div>';
+    const rows = await window.Supa.listShares(projectId);
+    if (!rows.length) {
+      wrap.innerHTML = '<div style="color:#9ca3af; font-size:11px;">Not shared with anyone yet.</div>';
+      return;
+    }
+    wrap.innerHTML = rows.map(r => {
+      const userId = r.shared_with;
+      const isViewer = r.role === 'viewer';
+      // For viewer-role invitees, lock the per-row dropdown to "Viewer" — they
+      // can't be granted edit access anyway.
+      const roleSelect = isViewer
+        ? `<select style="font-size:11px;" disabled title="Global viewer — cannot be promoted to Editor here.">
+             <option>Viewer</option>
+           </select>`
+        : `<select style="font-size:11px;" onchange="changeShareRole('${esc(projectId)}','${esc(userId)}', this.value === 'edit')">
+             <option value="edit" ${r.can_edit ? 'selected' : ''}>Editor</option>
+             <option value="view" ${r.can_edit ? '' : 'selected'}>Viewer</option>
+           </select>`;
+      return `
+        <div style="display:flex; align-items:center; gap:8px; padding:4px 0; border-bottom:1px solid #f3f4f6;">
+          <span style="flex:1; font-size:12px;">${esc(r.email)}${isViewer ? ' <span style="color:#92400e; font-size:10px;">(global viewer)</span>' : ''}</span>
+          ${roleSelect}
+          <button type="button" class="btn btn-del" style="padding:2px 8px;font-size:11px;"
+                  onclick="removeShareFromModal('${esc(projectId)}','${esc(userId)}')">Revoke</button>
+        </div>`;
+    }).join('');
+  }
+
+  function setShareStatus(msg, kind /* 'ok' | 'err' | 'info' | '' */) {
+    const el = document.getElementById('m-share-status');
+    if (!el) return;
+    if (!msg) { el.style.display = 'none'; return; }
+    const palette = kind === 'ok'  ? { bg:'#dcfce7', fg:'#166534', bd:'#bbf7d0' }
+                  : kind === 'err' ? { bg:'#fee2e2', fg:'#991b1b', bd:'#fecaca' }
+                  :                  { bg:'#fef3c7', fg:'#92400e', bd:'#fde68a' };
+    el.style.background   = palette.bg;
+    el.style.color        = palette.fg;
+    el.style.border       = `1px solid ${palette.bd}`;
+    el.textContent        = msg;
+    el.style.display      = '';
+  }
+
+  // ── Share invite: searchable user picker ──
+  // Loaded once when the modal opens; refreshed if the share list changes.
+  let _shareAllUsers      = [];           // [{user_id, email, role}, ...]
+  let _shareSelectedUser  = null;         // currently picked invitee
+  let _shareExistingIds   = new Set();    // ids already shared on this project
+
+  async function loadShareUserPool(projectId) {
+    _shareAllUsers = await window.Supa.listAllProfiles();
+    const existing = await window.Supa.listShares(projectId);
+    _shareExistingIds = new Set(existing.map(s => s.shared_with));
+  }
+
+  function shareCandidates(query) {
+    const me = window.Supa.currentUserId();
+    const q  = (query || '').toLowerCase().trim();
+    return _shareAllUsers
+      .filter(u => u.user_id !== me)                  // not yourself
+      .filter(u => !_shareExistingIds.has(u.user_id)) // not already shared
+      .filter(u => !q || (u.email || '').toLowerCase().includes(q))
+      .slice(0, 50);                                  // cap to keep dropdown small
+  }
+
+  function renderSharePicker(query) {
+    const list = shareCandidates(query);
+    const wrap = document.getElementById('m-share-picker');
+    if (!list.length) {
+      wrap.innerHTML = '<div style="padding:8px 12px; font-size:12px; color:#9ca3af;">No matching users.</div>';
+    } else {
+      wrap.innerHTML = list.map(u => `
+        <div class="share-pick-item"
+             style="padding:6px 12px; cursor:pointer; font-size:12px; border-bottom:1px solid #f3f4f6; display:flex; align-items:center; gap:8px;"
+             onmousedown="pickShareUser('${esc(u.user_id)}')"
+             onmouseover="this.style.background='#f3f4f6';"
+             onmouseout="this.style.background='white';">
+          <span style="flex:1;">${esc(u.email || '(no email)')}</span>
+          ${u.role === 'viewer'
+            ? '<span style="font-size:10px; color:#92400e; background:#fef3c7; padding:1px 6px; border-radius:8px;">viewer-only</span>'
+            : (u.role === 'admin' ? '<span style="font-size:10px; color:#1e40af; background:#dbeafe; padding:1px 6px; border-radius:8px;">admin</span>' : '')}
+        </div>`).join('');
+    }
+    wrap.style.display = 'block';
+  }
+
+  function onShareSearchInput() {
+    const q = document.getElementById('m-share-search').value;
+    renderSharePicker(q);
+  }
+  function closeSharePicker() {
+    const w = document.getElementById('m-share-picker');
+    if (w) w.style.display = 'none';
+  }
+
+  function pickShareUser(userId) {
+    const u = _shareAllUsers.find(x => x.user_id === userId);
+    if (!u) return;
+    _shareSelectedUser = u;
+    document.getElementById('m-share-search').value = '';
+    closeSharePicker();
+    const pill = document.getElementById('m-share-selected-pill');
+    pill.innerHTML = `👤 ${esc(u.email)}${u.role === 'viewer' ? ' <span style="font-size:10px;">(viewer)</span>' : ''}`;
+    document.getElementById('m-share-selected-row').style.display = 'flex';
+
+    // Constrain role dropdown — global-viewer users can only be shared as Viewer.
+    const roleSel = document.getElementById('m-share-role');
+    if (u.role === 'viewer') {
+      roleSel.innerHTML = '<option value="view">Viewer</option>';
+      roleSel.value = 'view';
+      roleSel.disabled = true;
+      roleSel.title = 'This user has the global "viewer" role and cannot be granted edit access.';
+    } else {
+      roleSel.innerHTML = '<option value="edit">Editor</option><option value="view">Viewer</option>';
+      roleSel.disabled = false;
+      roleSel.title = '';
+    }
+  }
+
+  function clearShareSelected() {
+    _shareSelectedUser = null;
+    document.getElementById('m-share-selected-row').style.display = 'none';
+    const roleSel = document.getElementById('m-share-role');
+    roleSel.innerHTML = '<option value="edit">Editor</option><option value="view">Viewer</option>';
+    roleSel.disabled = false;
+  }
+
+  async function addShareFromModal() {
+    const section   = document.getElementById('m-share-section');
+    const projectId = section.dataset.projectId;
+    if (!projectId) return;
+    const u = _shareSelectedUser;
+    if (!u) { setShareStatus('Pick a user from the dropdown first.', 'err'); return; }
+    const roleSel = document.getElementById('m-share-role').value;
+    if (u.role === 'viewer' && roleSel === 'edit') {
+      setShareStatus(`${u.email} is a global viewer and can only be shared as Viewer.`, 'err');
+      return;
+    }
+
+    // Defensive: if the project isn't in the cloud yet (just created, save
+    // still pending) the FK on project_shares.project_id will reject. Force
+    // a save and retry once before showing the error.
+    if (!window.Supa.isInCloud(projectId)) {
+      setShareStatus('Saving the project first…', 'info');
+      try { await window.Supa.forceSave(); } catch (_) {}
+      if (!window.Supa.isInCloud(projectId)) {
+        setShareStatus(
+          `Project ${projectId} hasn't been saved to the cloud yet. ` +
+          `Hit 💾 Save in the toolbar, then try sharing again.`,
+          'err'
+        );
+        return;
+      }
+    }
+
+    try {
+      await window.Supa.addShare(projectId, u.user_id, roleSel === 'edit');
+      setShareStatus(`Shared with ${u.email} as ${roleSel === 'edit' ? 'Editor' : 'Viewer'}.`, 'ok');
+      clearShareSelected();
+      await loadShareUserPool(projectId);
+      await refreshShareList(projectId);
+    } catch (e) {
+      const msg = e?.message || String(e);
+      const friendly = msg.includes('project_shares_project_id_fkey')
+        ? `Project ${projectId} isn't in the cloud. Save it first (💾 Save) and try again.`
+        : msg.includes('project_shares_shared_with_fkey')
+        ? `That user no longer exists in auth.`
+        : `Share failed: ${msg}`;
+      setShareStatus(friendly, 'err');
+    }
+  }
+
+  async function changeShareRole(projectId, userId, canEdit) {
+    try {
+      await window.Supa.updateShare(projectId, userId, canEdit);
+      await refreshShareList(projectId);
+    } catch (_) { flashHint('Update failed'); }
+  }
+
+  async function removeShareFromModal(projectId, userId) {
+    if (!confirm('Revoke access?')) return;
+    try {
+      await window.Supa.removeShare(projectId, userId);
+      await refreshShareList(projectId);
+    } catch (_) { flashHint('Revoke failed'); }
   }
 
   function refreshComputedFields() {
@@ -2395,8 +4380,10 @@
       actual_start: actualStart,
       actual_end:   actualEnd,
       slack:        document.getElementById('m-slack').value,
-      // Cap % Done to [0, 100] — user can type anything in the input
-      percent_done: clampPercent(document.getElementById('m-percent-done').value),
+      // % Done is only editable on leaves; parents derive from children. The
+      // input is read-only for parents, but skip persisting it regardless so
+      // the row is unambiguous in storage.
+      percent_done: isParent ? '' : clampPercent(document.getElementById('m-percent-done').value),
       // For parent rows: Est / Cost roll up from children — don't persist their values
       est_cost:     isParent ? '' : document.getElementById('m-est-cost').value,
       cost_to_date: isParent ? '' : document.getElementById('m-cost-date').value,
@@ -2404,6 +4391,12 @@
       sale_price:   typeFromId(id) === 'project' ? document.getElementById('m-sale-price').value : '',
       collapsed:    modalIdx >= 0 ? NODES[modalIdx].collapsed : false,
     };
+
+    // Predecessor gate — if this is a subtask whose predecessors aren't all 100%,
+    // force its stored % done to 0 so the row can't "start" until they finish.
+    if (!isParent && !predecessorsComplete(node)) {
+      node.percent_done = 0;
+    }
 
     // Detect ID collisions
     const conflictIdx = NODES.findIndex((n, i) => n.id === id && i !== modalIdx);
@@ -2451,7 +4444,14 @@
     if (descendants.length) msg += `\n\nThis will also delete ${descendants.length} child row(s).`;
     if (!confirm(msg)) return;
     pushHistory();
+    const idsToDelete = [n.id, ...descendants.map(x => x.id)];
+
     NODES = NODES.filter(x => x !== n && !x.id.startsWith(n.id + '-'));
+
+    if (window.Supa) {
+      window.Supa.deleteRows(idsToDelete);
+    }
+
     saveLocal();
     populateFilters();
     closeModal();
@@ -2487,7 +4487,12 @@
         html += `<div class="tip-row"><b>Slack:</b> ${esc(showVal)} day${showVal === 1 ? '' : 's'}${capped ? ` <span style="color:#9ca3af;font-size:10px;">(raw ${esc(raw)}, capped to ${esc(MAX_SLACK_CAP)})</span>` : ''}</div>`;
       }
     }
-                          html += `<div class="tip-row"><b>% Done:</b> ${esc(n.percent_done || 0)}% · <b style="color:${STATUS_COLORS[status]}">${esc(status)}</b></div>`;
+    {
+      const isParent = childrenOf(n).length > 0;
+      const pdEff = ePercentDone(n);
+      const pdStr = pdEff % 1 === 0 ? pdEff.toFixed(0) : pdEff.toFixed(1);
+      html += `<div class="tip-row"><b>% Done:</b> ${pdStr}%${isParent ? ' <span style="color:#9ca3af;font-size:10px;">(rolled up)</span>' : ''} · <b style="color:${STATUS_COLORS[status]}">${esc(status)}</b></div>`;
+    }
     if (n.est_cost)      html += `<div class="tip-row"><b>Est. Cost:</b> $${esc(n.est_cost)}</div>`;
     if (n.cost_to_date)  html += `<div class="tip-row"><b>Cost-to-Date:</b> $${esc(n.cost_to_date)}</div>`;
     if (variance !== '') html += `<div class="tip-row"><b>Variance:</b> $${esc(variance)}</div>`;
@@ -2511,8 +4516,277 @@
   }
 
   /* ══════════════════════════════════════════════════════════════
-     CSV / XLSX IMPORT (re-uses logic from previous template)
+     CSV IMPORT — port of build_artifact.py logic into the browser.
+     Drops parse the CSV client-side, detect columns, auto-assign IDs
+     based on existing IDs or indent hints, then append as new projects
+     (P-numbers are renumbered to avoid colliding with existing data).
   ══════════════════════════════════════════════════════════════ */
+  const IMPORT_ROLE_PATTERNS = {
+    id:           ['id', 'code', 'wbs'],
+    name:         ['project name', 'project task subtask', 'task name', 'project', 'task', 'subtask', 'title', 'activity', 'name'],
+    owner:        ['assigned to', 'assignee', 'owner', 'responsible', 'lead', 'manager', 'pm'],
+    predecessors: ['predecessor', 'depends on', 'blocks', 'blocked by', 'dependency'],
+    sched_start:  ['sched start', 'sched. start', 'planned start', 'scheduled start', 'start date', 'start', 'begin', 'kickoff'],
+    sched_end:    ['sched end', 'sched. end', 'planned end', 'scheduled end', 'end date', 'end', 'finish', 'due', 'deadline'],
+    actual_start: ['actual start', 'real start'],
+    actual_end:   ['actual end', 'real end', 'actual finish'],
+    slack:        ['slack', 'float'],
+    percent_done: ['percent done', 'percent complete', 'done', 'complete'],
+    est_cost:     ['estimated cost', 'est cost', 'budget', 'allocated', 'allowance'],
+    cost_to_date: ['cost to date', 'actual cost', 'spent', 'incurred'],
+    sale_price:   ['sale price', 'revenue', 'price', 'contract value'],
+  };
+  const IMPORT_REQUIRED = ['name', 'sched_start', 'sched_end'];
+
+  function normHeader(s) {
+    return String(s).toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').trim();
+  }
+  function detectColumns(headers) {
+    const used = new Set();
+    const mapping = {};
+    const normed = headers.map(h => [h, normHeader(h)]);
+    for (const role of Object.keys(IMPORT_ROLE_PATTERNS)) {
+      for (const pat of IMPORT_ROLE_PATTERNS[role]) {
+        let hit = false;
+        for (const [orig, norm] of normed) {
+          if (used.has(orig) || !orig) continue;
+          if (norm.includes(pat)) {
+            mapping[role] = orig; used.add(orig); hit = true; break;
+          }
+        }
+        if (hit) break;
+      }
+    }
+    return mapping;
+  }
+
+  // Tiny CSV parser — handles quoted fields, escaped quotes, CRLF.
+  function parseCSV(text) {
+    const lines = [];
+    let cur = [], field = '', inQuotes = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (inQuotes) {
+        if (c === '"') {
+          if (text[i + 1] === '"') { field += '"'; i++; }
+          else inQuotes = false;
+        } else field += c;
+      } else {
+        if (c === '"') inQuotes = true;
+        else if (c === ',') { cur.push(field); field = ''; }
+        else if (c === '\n' || c === '\r') {
+          cur.push(field); field = '';
+          if (cur.some(x => x !== '')) lines.push(cur);
+          cur = [];
+          if (c === '\r' && text[i + 1] === '\n') i++;
+        } else field += c;
+      }
+    }
+    if (field !== '' || cur.length) { cur.push(field); if (cur.some(x => x !== '')) lines.push(cur); }
+    if (!lines.length) return { headers: [], rows: [] };
+    const headers = lines[0].map(h => String(h).trim());
+    const rows = lines.slice(1).map(line => {
+      const obj = {};
+      headers.forEach((h, idx) => obj[h] = line[idx] !== undefined ? line[idx] : '');
+      return obj;
+    });
+    return { headers, rows };
+  }
+
+  function normalizeImportId(s) {
+    if (!s) return '';
+    s = String(s).trim();
+    if (/^P\d+(-T\d+(-S\d+)?)?$/.test(s)) return s;
+    let m = s.match(/^(P\d+)-T(\d+)\.(\d+)$/);
+    if (m) return `${m[1]}-T${m[2]}-S${m[3]}`;
+    m = s.match(/^P(\d+)\.(\d+)(?:\.(\d+))?$/);
+    if (m) {
+      let out = `P${m[1]}-T${m[2]}`;
+      if (m[3]) out += `-S${m[3]}`;
+      return out;
+    }
+    return s;
+  }
+  function inferTypeFromImportId(s) {
+    if (!s) return 'project';
+    const parts = String(s).split('-');
+    if (parts.length === 1) return 'project';
+    if (parts.length === 2) return 'task';
+    return 'subtask';
+  }
+  function inferIndent(name) {
+    if (!name) return 0;
+    const s = String(name);
+    if (s.startsWith('•') || /^\s{2,}•/.test(s)) return 2;
+    if (s.startsWith('▸') || s.startsWith('►') || /^\s{2,}▸/.test(s)) return 1;
+    const leading = s.length - s.replace(/^[ \t]+/, '').length;
+    return Math.min(2, Math.floor(leading / 2));
+  }
+  function cleanImportName(s) {
+    if (!s) return '';
+    return String(s).replace(/^[\s•▸►▶★*]+\s*/, '').trim();
+  }
+  function parseImportDate(v) {
+    if (v == null || v === '') return '';
+    const s = String(v).trim();
+    if (!s) return '';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    let m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
+    if (m) {
+      let a = +m[1], b = +m[2], c = +m[3];
+      if (c < 100) c += c < 70 ? 2000 : 1900;
+      // Default day-first (matches build_artifact.py).
+      let d = a, mo = b;
+      if (d > 12 && mo <= 12) { /* keep */ }
+      else if (d > 31) { [d, mo] = [mo, d]; }
+      if (mo >= 1 && mo <= 12 && d >= 1 && d <= 31) {
+        return `${String(c).padStart(4,'0')}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      }
+    }
+    if (/^\d{4,5}$/.test(s)) {
+      const serial = parseInt(s, 10);
+      if (serial > 25000 && serial < 80000) {
+        const base = Date.UTC(1899, 11, 30);
+        const d = new Date(base + serial * 86400000);
+        return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
+      }
+    }
+    return '';
+  }
+  function parseImportNum(v) {
+    if (v == null || v === '') return '';
+    const s = String(v).replace(/[$,\s]/g, '');
+    const f = parseFloat(s);
+    return isNaN(f) ? '' : f;
+  }
+  function parseImportPercent(v) {
+    if (v == null || v === '') return '';
+    let s = String(v).trim().replace(/%$/, '').trim();
+    let f = parseFloat(s);
+    if (isNaN(f)) return '';
+    if (f > 0 && f <= 1) f *= 100;
+    if (f < 0) f = 0;
+    if (f > 100) f = 100;
+    return Math.round(f);
+  }
+
+  function buildImportedNodes(headers, rows) {
+    const mapping = detectColumns(headers);
+    const missing = IMPORT_REQUIRED.filter(r => !mapping[r]);
+    if (missing.length) {
+      return { error: `Couldn't detect column(s) for: ${missing.join(', ')}.\n\nFound headers: ${headers.join(', ')}\n\nRename a column to include words like "name", "start date", "end date" and try again.` };
+    }
+
+    // Auto-assign IDs (mirrors build_artifact.auto_assign_ids).
+    const idCol = mapping.id, nameCol = mapping.name;
+    let projCounter = 0, taskCounter = 0, subtCounter = 0;
+    let curProject = null, curTask = null;
+    const assigned = [];
+    for (const row of rows) {
+      const rawId = idCol ? String(row[idCol] || '').trim() : '';
+      const rawName = nameCol ? (row[nameCol] || '') : '';
+      const cleaned = cleanImportName(rawName);
+      if (rawId) {
+        const norm = normalizeImportId(rawId);
+        const t = inferTypeFromImportId(norm);
+        row._id = norm; row._type = t; row._name = cleaned;
+        if (t === 'project') { curProject = norm; taskCounter = 0; }
+        else if (t === 'task') { curTask = norm; subtCounter = 0; }
+      } else {
+        const indent = inferIndent(rawName);
+        if (indent === 0) {
+          projCounter++; taskCounter = 0;
+          curProject = `P${projCounter}`;
+          row._id = curProject; row._type = 'project';
+        } else if (indent === 1 && curProject) {
+          taskCounter++; subtCounter = 0;
+          curTask = `${curProject}-T${taskCounter}`;
+          row._id = curTask; row._type = 'task';
+        } else if (indent === 2 && curTask) {
+          subtCounter++;
+          row._id = `${curTask}-S${subtCounter}`; row._type = 'subtask';
+        } else {
+          projCounter++;
+          row._id = `P${projCounter}`; row._type = 'project';
+        }
+        row._name = cleaned;
+      }
+      assigned.push(row);
+    }
+
+    const get = (row, role) => mapping[role] ? row[mapping[role]] : '';
+    const nodes = assigned.filter(r => r._name).map(row => {
+      const rawPreds = String(get(row, 'predecessors') || '').trim();
+      const normPreds = rawPreds
+        ? rawPreds.split(/[,;]/).map(p => normalizeImportId(p.trim())).filter(Boolean).join(', ')
+        : '';
+      return {
+        id: row._id,
+        type: row._type,
+        name: row._name,
+        owner: String(get(row, 'owner') || '').trim(),
+        predecessors: normPreds,
+        sched_start: parseImportDate(get(row, 'sched_start')),
+        sched_end:   parseImportDate(get(row, 'sched_end')),
+        actual_start: parseImportDate(get(row, 'actual_start')),
+        actual_end:   parseImportDate(get(row, 'actual_end')),
+        slack:        parseImportNum(get(row, 'slack')),
+        percent_done: parseImportPercent(get(row, 'percent_done')),
+        est_cost:     parseImportNum(get(row, 'est_cost')),
+        cost_to_date: parseImportNum(get(row, 'cost_to_date')),
+        sale_price:   parseImportNum(get(row, 'sale_price')),
+        collapsed: false,
+      };
+    });
+    return { nodes, mapping };
+  }
+
+  // Renumber any imported P-IDs that collide with existing projects, and
+  // rewrite every reference (own id + predecessor list) to match.
+  function remapCollidingProjectIds(imported) {
+    const existing = new Set();
+    NODES.forEach(n => {
+      const m = (n.id || '').match(/^P(\d+)/);
+      if (m) existing.add(parseInt(m[1], 10));
+    });
+    const importedNums = new Set();
+    imported.forEach(n => {
+      const m = (n.id || '').match(/^P(\d+)/);
+      if (m) importedNums.add(parseInt(m[1], 10));
+    });
+    const remap = {};
+    let nextFree = (existing.size ? Math.max(...existing) : 0) + 1;
+    for (const num of importedNums) {
+      if (existing.has(num)) {
+        while (existing.has(nextFree) || importedNums.has(nextFree)) nextFree++;
+        remap[`P${num}`] = `P${nextFree}`;
+        existing.add(nextFree);
+        nextFree++;
+      } else {
+        existing.add(num);
+      }
+    }
+    if (!Object.keys(remap).length) return;
+    const rewrite = (id) => {
+      if (!id) return id;
+      for (const [oldP, newP] of Object.entries(remap)) {
+        if (id === oldP) return newP;
+        if (id.startsWith(oldP + '-')) return newP + id.slice(oldP.length);
+      }
+      return id;
+    };
+    imported.forEach(n => {
+      n.id = rewrite(n.id);
+      if (n.predecessors) {
+        n.predecessors = n.predecessors
+          .split(/[,;]/)
+          .map(p => rewrite(p.trim()))
+          .filter(Boolean)
+          .join(', ');
+      }
+    });
+  }
+
   const dropOverlay = document.getElementById('dropOverlay');
   ['dragenter','dragover'].forEach(evt => {
     document.body.addEventListener(evt, e => {
@@ -2529,7 +4803,55 @@
     dropOverlay.classList.remove('active');
     const file = e.dataTransfer.files[0];
     if (!file) return;
-    alert('Import on drop: send this file back to Claude and re-run the gantt-chart skill to map columns into the new schema.');
+
+    const lname = file.name.toLowerCase();
+    if (!lname.endsWith('.csv')) {
+      alert('In-browser import supports .csv only. For Excel, "Save As… CSV UTF-8" first.');
+      return;
+    }
+
+    let text;
+    try { text = await file.text(); }
+    catch (err) { alert('Could not read file: ' + err.message); return; }
+
+    const { headers, rows } = parseCSV(text);
+    if (!headers.length || !rows.length) { alert('CSV is empty or has no data rows.'); return; }
+
+    const result = buildImportedNodes(headers, rows);
+    if (result.error) { alert(result.error); return; }
+    if (!result.nodes.length) { alert('No usable rows in this CSV.'); return; }
+
+    // Append as new projects; existing rows are untouched. Colliding P-IDs are
+    // renumbered to the next free number so nothing in the current board is
+    // overwritten or merged into.
+    const projectCount = result.nodes.filter(n => n.type === 'project').length;
+    if (NODES.length && !confirm(
+      `Import ${result.nodes.length} rows (${projectCount} project${projectCount === 1 ? '' : 's'}) from "${file.name}"?\n\n` +
+      `Existing data will be kept. New projects get fresh IDs to avoid clashes.\n\n` +
+      `(Cancel to abort. To replace all data instead, use ↺ Reset first.)`
+    )) return;
+
+    pushHistory();
+    remapCollidingProjectIds(result.nodes);
+
+    // Dedupe against existing NODES — if the CSV repeats an id that already
+    // exists after remap (e.g. a row exported and re-dropped without renumbering),
+    // skip it rather than create a duplicate that would crash the Supabase upsert.
+    const existingIds = new Set(NODES.map(n => n.id));
+    const seenImport = new Set();
+    let skipped = 0;
+    for (const n of result.nodes) {
+      if (existingIds.has(n.id) || seenImport.has(n.id)) { skipped++; continue; }
+      seenImport.add(n.id);
+      NODES.push(n);
+    }
+    if (skipped) console.warn(`[import] skipped ${skipped} row(s) whose ids already exist`);
+
+    // Select newly imported projects in the filter so they're visible.
+    result.nodes.forEach(n => { if (n.type === 'project') selectedProjects.add(n.id); });
+
+    saveLocal(); populateFilters(); render();
+    flashHint(`📥 Imported ${result.nodes.length} row${result.nodes.length === 1 ? '' : 's'} from ${file.name}`);
   });
 
   /* ══════════════════════════════════════════════════════════════
@@ -2668,9 +4990,11 @@
       sheetXml += cellDate(`H${rowNum}`, n.actual_end);
       // I: Slack
       sheetXml += cellNum(`I${rowNum}`, n.slack);
-      // J: % Done (write as 0-1 with percent format)
-      const pd = parseFloat(n.percent_done);
-      if (!isNaN(pd)) sheetXml += `<c r="J${rowNum}" s="9"><v>${pd / 100}</v></c>`;
+      // J: % Done (rolled up for parents). Written as 0–1 with percent format.
+      {
+        const pd = ePercentDone(n);
+        sheetXml += `<c r="J${rowNum}" s="9"><v>${pd / 100}</v></c>`;
+      }
       // K-O: Money
       sheetXml += cellMoney(`K${rowNum}`, n.est_cost);
       sheetXml += cellMoney(`L${rowNum}`, n.cost_to_date);
@@ -3086,8 +5410,10 @@
       // Meta line — owner + % + costs
       ctx.fillStyle = '#9ca3af'; ctx.font = '10px -apple-system';
       const metaParts = [];
+      const pdEff   = ePercentDone(n);
+      const pdLabel = pdEff % 1 === 0 ? pdEff.toFixed(0) : pdEff.toFixed(1);
       if (n.owner) metaParts.push(n.owner);
-      if (n.percent_done != null && n.percent_done !== '') metaParts.push(`${n.percent_done}%`);
+      metaParts.push(`${pdLabel}%`);
       if (n.est_cost) metaParts.push(`Est ${fmtMoney(n.est_cost)}`);
       if (n.cost_to_date) metaParts.push(`Spent ${fmtMoney(n.cost_to_date)}`);
       if (n.sale_price) metaParts.push(`Sale ${fmtMoney(n.sale_price)}`);
@@ -3100,14 +5426,13 @@
         const color = colorFor(n);
         ctx.fillStyle = color;
         roundRect(ctx, bx, ry + 12, bw, 20, 3);
-        // Progress overlay
-        const pd = Math.max(0, Math.min(100, parseFloat(n.percent_done) || 0));
-        if (pd > 0 && pd < 100) {
+        // Progress overlay (uses rolled-up % done for parents)
+        if (pdEff > 0 && pdEff < 100) {
           ctx.fillStyle = 'rgba(0,0,0,.18)';
-          roundRect(ctx, bx + (bw * pd / 100), ry + 12, bw * (100 - pd) / 100, 20, 0);
+          roundRect(ctx, bx + (bw * pdEff / 100), ry + 12, bw * (100 - pdEff) / 100, 20, 0);
         }
         ctx.fillStyle = 'white'; ctx.font = 'bold 10px -apple-system'; ctx.textAlign='left';
-        if (bw > 60) ctx.fillText(`${n.id} · ${n.percent_done || 0}%`, bx + 5, ry + 26);
+        if (bw > 60) ctx.fillText(`${n.id} · ${pdLabel}%`, bx + 5, ry + 26);
       }
     });
 
