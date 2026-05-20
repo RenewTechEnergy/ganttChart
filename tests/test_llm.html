@@ -261,29 +261,33 @@
   // -- expectation helpers --
   const isExtraction = (d) =>
     d && typeof d === 'object' &&
-    'action' in d && 'task' in d && 'project' in d && 'time_frame' in d && 'confidence' in d;
+    'operation' in d && 'target' in d && 'parameters' in d &&
+    'reasoning' in d && 'confidence' in d &&
+    'needs_clarification' in d && 'missing_fields' in d;
 
   const isFallback = (d) =>
     isExtraction(d) &&
-    d.action === 'N/A' && d.task === 'N/A' &&
-    d.project === 'N/A' && d.time_frame === 'N/A' &&
+    d.operation === 'N/A' &&
+    d.target && d.target.project === 'N/A' && d.target.item === 'N/A' &&
     d.confidence === 'low';
 
   // -- test definitions --
   // Each test: { name, describe, request, check(res) -> { ok, reason } }
   const tests = [
     {
-      name: 'Project delay extraction (string message)',
-      describe: 'Sends a project delay sentence and expects extracted fields with high confidence.',
+      name: 'Shift item — delay extraction',
+      describe: 'Sends a project delay sentence and expects shift_item with direction:later and amount:2 weeks.',
       request: () => ({ body: { message: 'BESS for Glossodia is delayed by 2 weeks.', model: $('model').value } }),
       check: ({ status, data }) => {
         if (status !== 200) return { ok: false, reason: `Expected 200, got ${status}` };
         if (!isExtraction(data)) return { ok: false, reason: 'Response is not an extraction object' };
         const checks = [
-          [/delay/i.test(data.action), `action should mention "delay", got "${data.action}"`],
-          [/glossodia/i.test(data.project), `project should mention "Glossodia", got "${data.project}"`],
-          [/bess/i.test(data.task), `task should mention "BESS", got "${data.task}"`],
-          [/2\s*weeks?/i.test(data.time_frame), `time_frame should mention "2 weeks", got "${data.time_frame}"`],
+          [data.operation === 'shift_item', `operation should be "shift_item", got "${data.operation}"`],
+          [/glossodia/i.test(data.target.project), `target.project should mention "Glossodia", got "${data.target.project}"`],
+          [/bess/i.test(data.target.item), `target.item should mention "BESS", got "${data.target.item}"`],
+          [data.parameters.direction === 'later', `parameters.direction should be "later", got "${data.parameters.direction}"`],
+          [Number(data.parameters.amount) === 2, `parameters.amount should be 2, got "${data.parameters.amount}"`],
+          [data.parameters.unit === 'weeks', `parameters.unit should be "weeks", got "${data.parameters.unit}"`],
           [data.confidence === 'high' || data.confidence === 'medium', `confidence should be high/medium, got "${data.confidence}"`],
         ];
         const failed = checks.find(c => !c[0]);
@@ -291,36 +295,38 @@
       },
     },
     {
-      name: 'Scheduled completion extraction',
-      describe: 'Tests a sentence about a future scheduled completion.',
-      request: () => ({ body: { message: 'The DA approval for Riverstone should be completed by next Friday.', model: $('model').value } }),
+      name: 'Create item with deadline',
+      describe: 'Tests a create_item operation with a deadline parameter.',
+      request: () => ({ body: { message: 'Add grid connection application to Riverstone and make it due next Friday.', model: $('model').value } }),
       check: ({ status, data }) => {
         if (status !== 200) return { ok: false, reason: `Expected 200, got ${status}` };
         if (!isExtraction(data)) return { ok: false, reason: 'Response is not an extraction object' };
         const checks = [
-          [/riverstone/i.test(data.project), `project should mention "Riverstone", got "${data.project}"`],
-          [/da|approval/i.test(data.task), `task should mention "DA"/"approval", got "${data.task}"`],
-          [/friday/i.test(data.time_frame), `time_frame should mention "Friday", got "${data.time_frame}"`],
+          [data.operation === 'create_item', `operation should be "create_item", got "${data.operation}"`],
+          [/riverstone/i.test(data.target.project), `target.project should mention "Riverstone", got "${data.target.project}"`],
+          [/grid/i.test(data.target.item), `target.item should mention "grid", got "${data.target.item}"`],
+          [/friday/i.test(data.parameters.deadline), `parameters.deadline should mention "Friday", got "${data.parameters.deadline}"`],
         ];
         const failed = checks.find(c => !c[0]);
         return failed ? { ok: false, reason: failed[1] } : { ok: true, reason: 'All fields look right.' };
       },
     },
     {
-      name: 'Blocked task with messages[] array',
-      describe: 'Verifies the function picks the latest user message from a messages[] history.',
+      name: 'Update progress with messages[] array',
+      describe: 'Verifies the function picks the latest user message from a messages[] history and emits update_progress.',
       request: () => ({ body: { messages: [
         { role: 'user', content: 'Hi there' },
         { role: 'assistant', content: 'Hello, how can I help?' },
-        { role: 'user', content: 'Inverter installation at Glossodia is blocked.' },
+        { role: 'user', content: 'DA approval for Glossodia is now complete.' },
       ], model: $('model').value } }),
       check: ({ status, data }) => {
         if (status !== 200) return { ok: false, reason: `Expected 200, got ${status}` };
         if (!isExtraction(data)) return { ok: false, reason: 'Response is not an extraction object' };
         const checks = [
-          [/block/i.test(data.action), `action should mention "block", got "${data.action}"`],
-          [/glossodia/i.test(data.project), `project should mention "Glossodia", got "${data.project}"`],
-          [/inverter/i.test(data.task), `task should mention "inverter", got "${data.task}"`],
+          [data.operation === 'update_progress', `operation should be "update_progress", got "${data.operation}"`],
+          [/glossodia/i.test(data.target.project), `target.project should mention "Glossodia", got "${data.target.project}"`],
+          [/da|approval/i.test(data.target.item), `target.item should mention "DA"/"approval", got "${data.target.item}"`],
+          [Number(data.parameters.percent_done) === 100, `parameters.percent_done should be 100, got "${data.parameters.percent_done}"`],
         ];
         const failed = checks.find(c => !c[0]);
         return failed ? { ok: false, reason: failed[1] } : { ok: true, reason: 'Latest user message extracted correctly.' };
