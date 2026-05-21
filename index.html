@@ -237,6 +237,34 @@
     .ai-caps ul { margin: 0 0 6px; padding-left: 18px; }
     .ai-caps li { margin: 2px 0; }
     .ai-caps li em { color: #6b7280; font-style: normal; }
+    .ai-batch-edit { align-self: stretch; background: #fafafa;
+      border: 1px solid #e5e7eb; color: #1f2937; font-size: 11px;
+      line-height: 1.45; padding: 8px 10px; }
+    .ai-batch-edit-head { font-weight: 700; color: #374151;
+      margin-bottom: 6px; font-size: 11px; }
+    .ai-batch-card { background: white; border: 1px solid #e5e7eb;
+      border-radius: 6px; padding: 8px 10px; margin: 6px 0; }
+    .ai-batch-card.skipped { opacity: 0.5; background: #fef2f2; }
+    .ai-batch-card-head { display: flex; align-items: center;
+      gap: 6px; margin-bottom: 6px; }
+    .ai-batch-card-num { font-weight: 700; color: #6b7280;
+      font-size: 10px; min-width: 14px; }
+    .ai-batch-card .ai-batch-row { display: grid;
+      grid-template-columns: 84px 1fr; gap: 6px 8px; align-items: center;
+      margin-bottom: 4px; }
+    .ai-batch-card label { color: #6b7280; font-size: 10px;
+      text-transform: uppercase; letter-spacing: 0.4px; }
+    .ai-batch-card select, .ai-batch-card input[type="text"],
+    .ai-batch-card input[type="number"] {
+      width: 100%; font-size: 11px; padding: 3px 6px;
+      border: 1px solid #d1d5db; border-radius: 4px;
+      background: white; color: #1f2937; }
+    .ai-batch-card select:focus, .ai-batch-card input:focus {
+      outline: 2px solid #7c3aed; border-color: transparent; }
+    .ai-batch-skip { font-size: 10px; color: #6b7280; cursor: pointer;
+      margin-left: auto; display: inline-flex; align-items: center;
+      gap: 4px; user-select: none; }
+    .ai-batch-skip input { margin: 0; }
     .ai-log { flex: 1; padding: 12px 14px; overflow-y: auto;
       display: flex; flex-direction: column; gap: 8px;
       font-size: 12px; color: #1f2937; }
@@ -1803,7 +1831,9 @@ Click ⓘ in the header for the full list of things I can do.</div>
     // ─── AI assistant: invoke the chat edge function ───
     // Returns the parsed operation JSON. Throws on HTTP error.
     // Pass either a single message string OR an array of { role, content }.
-    async function invokeChat(messageOrMessages, model) {
+    // Optional boardContext is a short text summary of the current board —
+    // injected as a second system message so the LLM can resolve hierarchy.
+    async function invokeChat(messageOrMessages, model, boardContext) {
       const useLocal = !!LOCAL_FUNCTIONS_BASE;
       const base     = useLocal ? LOCAL_FUNCTIONS_BASE : SUPABASE_URL;
       const apikey   = useLocal ? LOCAL_FUNCTIONS_KEY  : SUPABASE_PUBLISHABLE_KEY;
@@ -1812,6 +1842,9 @@ Click ⓘ in the header for the full list of things I can do.</div>
       const payload  = { model: model || "haiku" };
       if (Array.isArray(messageOrMessages)) payload.messages = messageOrMessages;
       else payload.message = messageOrMessages;
+      if (typeof boardContext === "string" && boardContext.trim()) {
+        payload.boardContext = boardContext;
+      }
       const res = await loggedFetch(url, {
         method: "POST",
         headers: {
@@ -6120,60 +6153,70 @@ Phase                                Dur (d)   Predecessor
     return { confident: aiIsConfident(hits) ? hits[0].item : null, candidates: top5 };
   }
 
-  // Profiles cache for owner fuzzy-matching. Populated lazily — neither
-  // `_usersCache` (admin Manage Users) nor `_shareAllUsers` (share modal)
-  // is guaranteed to be loaded before an AI prompt runs. We prefetch at
-  // panel-open time and again on submit so the cache is warm by the time
-  // an applier needs it.
-  let _aiProfilesCache = [];
-  let _aiProfilesCacheLoaded = false;
-  async function aiEnsureProfilesCache() {
-    if (_aiProfilesCacheLoaded) return _aiProfilesCache;
-    if (!window.Supa || typeof window.Supa.listAllProfiles !== 'function') {
-      _aiProfilesCacheLoaded = true;
-      return _aiProfilesCache;
+  // Build a compact tree of the projects in scope (selectedProjects, or all
+  // when none ticked) so the LLM can resolve hierarchy without guessing.
+  // Format keeps tokens low: one indented line per row with ID + name.
+  // Owners-in-use are appended as a one-line summary so the LLM can pick
+  // an existing owner over inventing a new one.
+  function aiBuildBoardContext() {
+    const projects = NODES
+      .filter(n => typeFromId(n.id) === 'project')
+      .filter(n => !selectedProjects || !selectedProjects.size || selectedProjects.has(n.id))
+      .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+    if (!projects.length) return '';
+    const lines = ['Projects in scope:'];
+    for (const p of projects) {
+      lines.push(`- ${p.id} ${p.name || '(unnamed)'}`);
+      const tasks = NODES
+        .filter(n => parentOf(n.id) === p.id)
+        .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+      for (const t of tasks) {
+        lines.push(`  - ${t.id} ${t.name || '(unnamed)'}`);
+        const subs = NODES
+          .filter(n => parentOf(n.id) === t.id)
+          .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+        for (const s of subs) {
+          lines.push(`    - ${s.id} ${s.name || '(unnamed)'}`);
+        }
+      }
     }
-    try {
-      const list = await window.Supa.listAllProfiles();
-      _aiProfilesCache = Array.isArray(list) ? list : [];
-    } catch (e) {
-      console.warn('[AI] listAllProfiles failed', e);
-      _aiProfilesCache = [];
+    const owners = [...new Set(NODES.map(n => (n.owner || '').trim()).filter(Boolean))].sort();
+    if (owners.length) {
+      lines.push('');
+      lines.push(`Owners currently in use: ${owners.join(', ')}.`);
     }
-    _aiProfilesCacheLoaded = true;
-    return _aiProfilesCache;
+    return lines.join('\n');
   }
 
-  // Match an owner string against the cached profile list. Returns
-  //   { confident: <profile|null>, candidates: profile[] }
-  // where each profile is { user_id, email, role, displayName }. The
-  // matcher is intentionally lenient — typing "jack" should match
-  // "jack.zhou@…" without prompting if there's only one such profile.
-  // If multiple "jack" profiles exist, both come back as candidates and
-  // the caller renders an owner-clarification UI.
-  function aiMatchOwner(query) {
+  // Match an owner string against the owners already in use across the
+  // board. The pool is the deduplicated set of non-empty `owner` strings
+  // on every row in `nodes` — same source as the "Filter owners" dropdown
+  // in the toolbar. Returns
+  //   { confident: <{name, count}|null>, candidates: [{name, count}, …] }
+  // Typing "jack" should match "Jack Zhou" without prompting if there's
+  // only one jack-* on the board; if there are two jacks both come back
+  // as candidates for the owner picker.
+  function aiMatchOwner(query, nodes) {
     if (!query || query === 'N/A') return { confident: null, candidates: [] };
-    const pool = _aiProfilesCache
-      .filter(p => p && p.email)
-      .map(p => ({
-        user_id: p.user_id,
-        email: p.email,
-        role: p.role,
-        displayName: String(p.email).split('@')[0],
-      }));
-    if (!pool.length) return { confident: null, candidates: [] };
-    // Exact local-part match shortcut — if "jack" === a profile's
-    // displayName, take it without consulting Fuse.
-    const exact = pool.find(p => p.displayName.toLowerCase() === query.toLowerCase());
+    const tally = new Map();
+    for (const n of (nodes || [])) {
+      const o = (n.owner || '').trim();
+      if (!o) continue;
+      tally.set(o, (tally.get(o) || 0) + 1);
+    }
+    if (!tally.size) return { confident: null, candidates: [] };
+    const pool = [...tally.entries()].map(([name, count]) => ({ name, count }));
+    // Exact match shortcut — case-insensitive equality wins immediately.
+    const exact = pool.find(p => p.name.toLowerCase() === query.toLowerCase());
     if (exact) return { confident: exact, candidates: [exact] };
-    const fuse = aiFuse(pool, ['displayName', 'email']);
+    const fuse = aiFuse(pool, ['name']);
     let hits = [];
     if (fuse) {
       hits = fuse.search(query);
     } else {
       const q = query.toLowerCase();
       hits = pool
-        .filter(p => p.displayName.toLowerCase().includes(q) || p.email.toLowerCase().includes(q))
+        .filter(p => p.name.toLowerCase().includes(q))
         .map(p => ({ item: p, score: 0 }));
     }
     if (!hits.length) return { confident: null, candidates: [] };
@@ -6474,20 +6517,20 @@ Phase                                Dur (d)   Predecessor
     if (!res.ok) return { ok: false, reason: res.reason, candidates: res.candidates };
     const owner = (op.parameters.owner || '').trim();
     if (!owner || owner === 'N/A') return { ok: false, reason: 'No owner specified.' };
-    // Owner clarification — fuzzy-match against the profiles list unless
-    // the user already disambiguated via aiOnOwnerPick / aiOnOwnerUseAsNew.
+    // Owner clarification — fuzzy-match against the owners already in use
+    // on the board unless the user already disambiguated via the picker.
     if (!op.parameters._ownerResolved) {
-      const om = aiMatchOwner(owner);
+      const om = aiMatchOwner(owner, draft);
       if (om.confident) {
-        op.parameters.owner = om.confident.displayName;
+        op.parameters.owner = om.confident.name;
       } else if (om.candidates.length) {
         return {
           ok: false, kind: 'owner', candidates: om.candidates,
           queriedName: owner,
-          reason: `Multiple users match "${owner}". Pick one or use as new.`,
+          reason: `Which owner did you mean by "${owner}"?`,
         };
       }
-      // No hits → fall through with the freeform string (today's behaviour).
+      // No hits → fall through with the freeform string (a brand-new owner).
     }
     const finalOwner = (op.parameters.owner || '').trim();
     const node = draft.find(n => n.id === res.id);
@@ -6497,18 +6540,19 @@ Phase                                Dur (d)   Predecessor
 
   function aiApplyCreate(op, draft) {
     // Owner clarification gate — same as aiApplyOwner. If the LLM included
-    // an owner string, match it against the profiles list before stamping
-    // it on the new row. Skipped when _ownerResolved is set by the picker.
+    // an owner string, match it against the owners already on the board
+    // before stamping it on the new row. Skipped when _ownerResolved is
+    // set by the picker.
     const ownerRaw = (op.parameters.owner || '').trim();
     if (ownerRaw && ownerRaw !== 'N/A' && !op.parameters._ownerResolved) {
-      const om = aiMatchOwner(ownerRaw);
+      const om = aiMatchOwner(ownerRaw, draft);
       if (om.confident) {
-        op.parameters.owner = om.confident.displayName;
+        op.parameters.owner = om.confident.name;
       } else if (om.candidates.length) {
         return {
           ok: false, kind: 'owner', candidates: om.candidates,
           queriedName: ownerRaw,
-          reason: `Multiple users match "${ownerRaw}". Pick one or use as new.`,
+          reason: `Which owner did you mean by "${ownerRaw}"?`,
         };
       }
     }
@@ -6611,8 +6655,28 @@ Phase                                Dur (d)   Predecessor
     const newNode = aiBuildNode(newId, newType,
       op.target.item && op.target.item !== 'N/A' ? op.target.item : 'New ' + newType,
       op.parameters.owner, start, end);
+    // Push first so predecessor cycle checks can see the new row.
     draft.push(newNode);
-    return { ok: true, targetId: newId, created: newNode };
+
+    // Apply predecessors if the create_item operation includes them. This
+    // is how cascading commands ("add subtask X under Y, predecessor Z and W")
+    // get bundled into a single op — the row is created and wired up at the
+    // same time, instead of being split into create + add_dependency + ...
+    const predResult = aiResolveCreatePredecessors(op, draft, newNode);
+    if (!predResult.ok) {
+      const idx = draft.findIndex(n => n.id === newNode.id);
+      if (idx >= 0) draft.splice(idx, 1);
+      return {
+        ok: false,
+        reason: predResult.reason || 'Could not resolve predecessors for the new item.',
+        kind: 'none',
+        candidates: [],
+      };
+    }
+    if (predResult.predIds.length) {
+      newNode.predecessors = predResult.predIds.join(', ');
+    }
+    return { ok: true, targetId: newId, created: newNode, predIds: predResult.predIds };
   }
 
   // Build a fresh NODES-shaped row with sensible defaults.
@@ -6659,6 +6723,155 @@ Phase                                Dur (d)   Predecessor
     return false;
   }
 
+  // Normalise op.parameters.predecessors / predecessor into a list of
+  // user-supplied name strings. Accepts arrays, comma/semicolon/"and"-
+  // delimited strings, or a single name. Drops "N/A" entries.
+  function aiNormalisePredNames(value) {
+    if (!value || value === 'N/A') return [];
+    if (Array.isArray(value)) {
+      return value.flatMap(v => aiNormalisePredNames(v)).filter(Boolean);
+    }
+    return String(value)
+      .split(/[,;]| and | & /i)
+      .map(s => s.trim())
+      .filter(Boolean)
+      .filter(s => s !== 'N/A');
+  }
+
+  // Build a flat searchable pool — one entry per non-project node — where
+  // each entry exposes the node's own name plus a breadcrumb formed by
+  // concatenating its name with every ancestor's name up to the project.
+  // Example: a "Solar panels" subtask under "Equipment Procurement" in
+  // "Mulgrave" gets breadcrumb "solar panels equipment procurement
+  // mulgrave". A multi-word query like "solar procurement" then matches
+  // it over a sibling "Solar install" (whose breadcrumb is "solar install
+  // inverter install mulgrave"), because the breadcrumb has more shared
+  // tokens. Scoped to a single project when projectNode is provided.
+  function aiBreadcrumbPool(nodes, projectNode) {
+    const byId = new Map(nodes.map(n => [n.id, n]));
+    const pool = [];
+    for (const n of nodes) {
+      if (typeFromId(n.id) === 'project') continue;
+      if (projectNode && n.id.split('-')[0] !== projectNode.id) continue;
+      const parts = [n.name || ''];
+      let cur = n;
+      while (true) {
+        const pid = parentOf(cur.id);
+        if (!pid) break;
+        const parent = byId.get(pid);
+        if (!parent) break;
+        parts.push(parent.name || '');
+        cur = parent;
+      }
+      pool.push({
+        item: n,
+        name: n.name || '',
+        breadcrumb: parts.filter(Boolean).join(' '),
+      });
+    }
+    return pool;
+  }
+
+  // Looser predecessor matcher — phrases like "solar procurement" are
+  // short and span hierarchy, so we search a breadcrumb pool with Fuse
+  // (weighted toward the breadcrumb field). Falls back to a token-overlap
+  // substring score when Fuse isn't loaded.
+  function aiBestItemMatchLoose(query, nodes, projectNode) {
+    if (!query || query === 'N/A') return { confident: null, candidates: [] };
+    const pool = aiBreadcrumbPool(nodes, projectNode);
+    if (!pool.length) return { confident: null, candidates: [] };
+    // Direct id hit wins over everything.
+    const idHit = pool.find(p => p.item.id.toLowerCase() === query.toLowerCase());
+    if (idHit) return { confident: idHit.item, candidates: [idHit.item] };
+
+    if (typeof Fuse !== 'undefined') {
+      const fuse = new Fuse(pool, {
+        keys: [
+          { name: 'breadcrumb', weight: 0.7 },
+          { name: 'name',       weight: 0.3 },
+        ],
+        includeScore: true,
+        threshold: 0.5,
+        ignoreLocation: true,
+        minMatchCharLength: 2,
+      });
+      const hits = fuse.search(query);
+      if (!hits.length) return { confident: null, candidates: [] };
+      const bestScore = hits[0].score ?? 1;
+      const confident = bestScore <= 0.35 ? hits[0].item.item : null;
+      return { confident, candidates: hits.slice(0, 5).map(h => h.item.item) };
+    }
+
+    // No Fuse — score by how many query tokens appear in each breadcrumb.
+    // Confident only when one entry strictly beats every other.
+    const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return { confident: null, candidates: [] };
+    const scored = pool.map(p => {
+      const hay = p.breadcrumb.toLowerCase();
+      let hits = 0;
+      for (const t of tokens) if (hay.includes(t)) hits++;
+      return { item: p.item, hits };
+    }).filter(s => s.hits > 0).sort((a, b) => b.hits - a.hits);
+    if (!scored.length) return { confident: null, candidates: [] };
+    const best = scored[0];
+    const confident = (scored.length === 1 || best.hits > scored[1].hits) ? best.item : null;
+    return { confident, candidates: scored.slice(0, 5).map(s => s.item) };
+  }
+
+  // Resolve every predecessor named in a create_item op against the
+  // current draft. Returns { ok: true, predIds } when all names resolved
+  // cleanly, or { ok: false, reason, unresolved } when at least one was
+  // missing / ambiguous / would create a cycle. The caller is expected to
+  // splice the new row back out of the draft on failure.
+  function aiResolveCreatePredecessors(op, draft, newNode) {
+    const rawPreds = op.parameters.predecessors ?? op.parameters.predecessor;
+    const predNames = aiNormalisePredNames(rawPreds);
+    if (!predNames.length) return { ok: true, predIds: [] };
+
+    const projectId = newNode.id.split('-')[0];
+    const projectNode = draft.find(n => n.id === projectId);
+
+    const predIds = [];
+    const unresolved = [];
+    for (const name of predNames) {
+      const match = aiBestItemMatchLoose(name, draft, projectNode);
+      if (!match.confident) {
+        unresolved.push({ name, candidates: match.candidates || [] });
+        continue;
+      }
+      const pred = match.confident;
+      if (pred.id === newNode.id) {
+        unresolved.push({ name, reason: 'A new item cannot depend on itself.', candidates: [] });
+        continue;
+      }
+      if (aiPredCreatesCycle(draft, newNode.id, pred.id)) {
+        unresolved.push({
+          name,
+          reason: `Adding ${pred.name} would create a circular dependency.`,
+          candidates: [],
+        });
+        continue;
+      }
+      if (!predIds.includes(pred.id)) predIds.push(pred.id);
+    }
+    if (unresolved.length) {
+      const lines = unresolved.map(u => {
+        if (u.reason) return `"${u.name}" — ${u.reason}`;
+        if (u.candidates && u.candidates.length) {
+          return `"${u.name}" matched multiple/uncertain tasks: ` +
+            u.candidates.map(c => `${c.id} ${c.name}`).join(', ');
+        }
+        return `"${u.name}" was not found`;
+      });
+      return {
+        ok: false,
+        reason: `Could not resolve predecessor${unresolved.length === 1 ? '' : 's'}:\n${lines.join('\n')}`,
+        unresolved,
+      };
+    }
+    return { ok: true, predIds };
+  }
+
   // add_dependency — append a predecessor to the target task's predecessors list.
   function aiApplyAddDependency(op, draft) {
     const res = aiResolveTarget(op.target, draft);
@@ -6666,23 +6879,31 @@ Phase                                Dur (d)   Predecessor
     const target = draft.find(n => n.id === res.id);
     if (!target) return { ok: false, reason: 'Target not found.' };
 
-    const predName = op.parameters.predecessor;
-    if (!predName || predName === 'N/A') {
-      return { ok: false, reason: 'No predecessor specified — say which task should come before it.' };
+    let pred;
+    // Honour an explicit predecessor pin set by the structured op editor
+    // (the dropdown picks an existing node id outright).
+    if (op.parameters._pinnedPredId) {
+      pred = draft.find(n => n.id === op.parameters._pinnedPredId);
+      if (!pred) return { ok: false, reason: `Pinned predecessor ${op.parameters._pinnedPredId} no longer exists.` };
+    } else {
+      const predName = op.parameters.predecessor;
+      if (!predName || predName === 'N/A') {
+        return { ok: false, reason: 'No predecessor specified — say which task should come before it.' };
+      }
+      // Resolve predecessor within the same project (most natural scope).
+      const projectId = target.id.split('-')[0];
+      const projectNode = draft.find(n => n.id === projectId);
+      const pm = aiMatchItem(predName, draft, projectNode, null);
+      if (!pm.confident && pm.candidates.length) {
+        return { ok: false,
+                 reason: `Which "${predName}" should be the predecessor of ${target.name}?`,
+                 kind: 'item', candidates: pm.candidates };
+      }
+      if (!pm.confident) {
+        return { ok: false, reason: `Predecessor "${predName}" not found in ${projectNode?.name || projectId}.` };
+      }
+      pred = pm.confident;
     }
-    // Resolve predecessor within the same project (most natural scope).
-    const projectId = target.id.split('-')[0];
-    const projectNode = draft.find(n => n.id === projectId);
-    const pm = aiMatchItem(predName, draft, projectNode, null);
-    if (!pm.confident && pm.candidates.length) {
-      return { ok: false,
-               reason: `Which "${predName}" should be the predecessor of ${target.name}?`,
-               kind: 'item', candidates: pm.candidates };
-    }
-    if (!pm.confident) {
-      return { ok: false, reason: `Predecessor "${predName}" not found in ${projectNode?.name || projectId}.` };
-    }
-    const pred = pm.confident;
 
     if (pred.id === target.id) {
       return { ok: false, reason: 'A task cannot depend on itself.' };
@@ -7093,18 +7314,17 @@ Phase                                Dur (d)   Predecessor
   // through the same clarification/commit machinery as a single prompt; the
   // queue waits for each commit (or cancellation) before pulling the next op.
   async function aiSubmitChange(messageText) {
-    // Fire the profiles fetch alongside the LLM call so the owner matcher
-    // has a populated cache by the time appliers run. The fetch is
-    // idempotent + lazy (aiEnsureProfilesCache memoises after first call).
-    const profilesPromise = aiEnsureProfilesCache();
     let resp;
     try {
-      resp = await window.Supa.invokeChat(AI.chatHistory.slice(), AI.defaultModel);
+      resp = await window.Supa.invokeChat(
+        AI.chatHistory.slice(),
+        AI.defaultModel,
+        aiBuildBoardContext(),
+      );
     } catch (e) {
       aiAppendMessage('assistant', '✗ ' + (e.message || String(e)));
       return;
     }
-    await profilesPromise;
     // Normalise to an array regardless of whether the LLM returned an envelope
     // or a single bare op (the edge fn already wraps, but be defensive).
     let ops = [];
@@ -7195,24 +7415,38 @@ Phase                                Dur (d)   Predecessor
     // create_item targeting a task/subtask: pre-resolve the containing project.
     if (op.operation === 'create_item') {
       if (op.target.item_type !== 'project') {
-        if (!op.target.project || op.target.project === 'N/A') {
-          aiAppendMessage('assistant', '✗ Which project should I add this to? Please re-ask with a project name.');
-          aiProcessNext();
-          return;
+        // Editor-driven path: parent is already pinned (to a task for
+        // subtasks, or to a project for tasks). Trust it.
+        if (!op.target._pinnedParentId) {
+          if (!op.target.project || op.target.project === 'N/A') {
+            aiAppendMessage('assistant', '✗ Which project should I add this to? Please re-ask with a project name.');
+            aiProcessNext();
+            return;
+          }
+          const pm = aiMatchProject(op.target.project, AI.draft || NODES);
+          if (!pm.confident && pm.candidates.length) {
+            aiAskClarification(op, pm.candidates, 'project',
+              `Which project should I add "${op.target.item || 'this item'}" to?`,
+              messageText);
+            return;
+          }
+          if (!pm.confident) {
+            aiAppendMessage('assistant', `✗ Project "${op.target.project}" not found.`);
+            aiProcessNext();
+            return;
+          }
+          // Pin the project ONLY for task-level creates. For subtasks we
+          // leave _pinnedParentId unset so aiApplyCreate can route the row
+          // under the matching task (via op.target.parent or single-task
+          // fallback). Pinning the project here would force the row to be
+          // created at task level — that's the bug the user reported.
+          if (op.target.item_type !== 'subtask') {
+            op.target._pinnedParentId = pm.confident.id;
+          } else {
+            // Normalise the project name so aiApplyCreate hits the same row.
+            op.target.project = pm.confident.name || op.target.project;
+          }
         }
-        const pm = aiMatchProject(op.target.project, AI.draft || NODES);
-        if (!pm.confident && pm.candidates.length) {
-          aiAskClarification(op, pm.candidates, 'project',
-            `Which project should I add "${op.target.item || 'this item'}" to?`,
-            messageText);
-          return;
-        }
-        if (!pm.confident) {
-          aiAppendMessage('assistant', `✗ Project "${op.target.project}" not found.`);
-          aiProcessNext();
-          return;
-        }
-        op.target._pinnedParentId = pm.confident.id;
       }
     } else {
       const resolve = aiResolveTarget(op.target, AI.draft || NODES);
@@ -7229,94 +7463,431 @@ Phase                                Dur (d)   Predecessor
     aiCommitOperation(op, messageText);
   }
 
-  // --- batch confirmation UI for compound prompts ---
-  // Render a single chat block with a checkbox per parsed op. User unticks
-  // any that were misinterpreted, then clicks "Apply selected".
+  // --- structured op editor for compound prompts ---
+  // For each parsed op the editor renders a card with dropdowns/inputs so
+  // the user can fix anything the LLM got wrong (op type, target project,
+  // parent task, predecessor item, owner …) before applying. Each card has
+  // a Skip toggle; only un-skipped ops dispatch. Replaces the old checkbox
+  // multi-op confirm.
   function aiAskBatchConfirm(ops, messageText) {
     const stashId = aiNewClarifyId();
-    AI.clarifications[stashId] = { kind: 'batch_confirm', ops, sourceText: messageText };
+    // Deep-copy ops so edits are scoped to this clarification and don't
+    // leak back into AI.opQueue / the original LLM payload.
+    const opsCopy = ops.map(o => JSON.parse(JSON.stringify(o)));
+    // Pre-populate skip flag: low-confidence ops start skipped.
+    for (const o of opsCopy) {
+      o._skip = o.confidence === 'low';
+      // Make sure parameters exists so the editor can read/write freely.
+      o.parameters = o.parameters || {};
+      o.target = o.target || {};
+    }
+    AI.clarifications[stashId] = {
+      kind: 'batch_confirm', ops: opsCopy, sourceText: messageText,
+    };
+    aiRenderBatchEditor(stashId);
+  }
+
+  // Render (or re-render) the editor block for a stashed batch. Re-renders
+  // on every field change so dependent dropdowns (parent/item/predecessor)
+  // refresh when the project changes.
+  function aiRenderBatchEditor(stashId) {
+    const stash = AI.clarifications[stashId];
+    if (!stash) return;
     const log = document.getElementById('ai-log');
     if (!log) return;
-    const wrap = document.createElement('div');
-    wrap.className = 'ai-msg ai-msg-assistant ai-clarify';
-    wrap.dataset.stash = stashId;
-    let html = `<div>I parsed ${ops.length} operation${ops.length === 1 ? '' : 's'}. Untick anything I got wrong, then apply:</div><div class="ai-batch-list">`;
-    ops.forEach((op, i) => {
-      // Pre-tick only if the LLM was confident enough. needs_clarification stays
-      // ticked too — the user can untick if they want to drop it.
-      const preChecked = op.confidence !== 'low' ? 'checked' : '';
-      const summary    = aiBatchSummary(op);
-      const missing    = (op.missing_fields && op.missing_fields.length)
-        ? ` <span class="ai-batch-missing">missing: ${aiEscapeHtml(op.missing_fields.join(', '))}</span>`
-        : '';
-      html += `<label class="ai-batch-item">
-        <input type="checkbox" data-idx="${i}" ${preChecked}>
-        <span class="ai-batch-op">${aiEscapeHtml(op.operation)}</span>
-        <span class="ai-batch-target">${aiEscapeHtml(summary)}</span>${missing}
-      </label>`;
-    });
-    html += `</div><div class="ai-cand-row">
-      <button class="ai-cand-btn" onclick="aiOnBatchApply('${stashId}')">Apply selected</button>
+    let wrap = document.querySelector(`.ai-clarify[data-stash="${stashId}"]`);
+    if (!wrap) {
+      wrap = document.createElement('div');
+      wrap.className = 'ai-msg ai-msg-assistant ai-clarify ai-batch-edit';
+      wrap.dataset.stash = stashId;
+      log.appendChild(wrap);
+    }
+    const n = stash.ops.length;
+    let html = `<div class="ai-batch-edit-head">I parsed ${n} operation${n === 1 ? '' : 's'}. Review and edit each one, then apply:</div>`;
+    stash.ops.forEach((op, i) => { html += aiRenderBatchCard(stashId, op, i); });
+    html += `<div class="ai-cand-row" style="margin-top:8px;">
+      <button class="ai-cand-btn" onclick="aiOnBatchApply('${stashId}')">Apply all</button>
       <button class="ai-cand-btn ai-cand-cancel" onclick="aiOnBatchCancel('${stashId}')">Cancel all</button>
     </div>`;
     wrap.innerHTML = html;
-    log.appendChild(wrap);
     log.scrollTop = log.scrollHeight;
   }
 
-  // Best-effort one-line summary of an op for the batch checkbox row.
-  function aiBatchSummary(op) {
-    const p = op.parameters || {};
-    const t = op.target || {};
-    const target = [t.item, t.project && t.project !== 'N/A' ? `in ${t.project}` : '']
-                   .filter(s => s && s !== 'N/A').join(' ');
+  // Render the editable card for one op. Operation-type dropdown sits at
+  // the top; the body below is rendered per op type.
+  function aiRenderBatchCard(stashId, op, idx) {
+    const OPS = [
+      ['create_item',                'Create task / subtask / project'],
+      ['add_dependency',             'Add dependency (predecessor)'],
+      ['assign_owner',               'Assign owner'],
+      ['shift_item',                 'Shift dates (delay / earlier)'],
+      ['update_progress',            'Update progress / status'],
+      ['delete_item',                'Delete item'],
+      ['update_item',                'Update field (rename / duration / budget)'],
+      ['query_schedule',             'Ask about an item (read-only)'],
+      ['create_project_candidate',   'New project candidate'],
+    ];
+    const opSelect = aiSelect('operation', idx, stashId, OPS, op.operation);
+    const skipChecked = op._skip ? 'checked' : '';
+    let body = '';
     switch (op.operation) {
-      case 'shift_item': {
-        const dir = p.direction === 'earlier' ? 'earlier' : 'later';
-        return `${target} — ${p.amount} ${p.unit} ${dir}`;
-      }
-      case 'update_progress':
-        return `${target} → ${p.percent_done}% (${p.status || ''})`;
-      case 'assign_owner':
-        return `${target} → owner ${p.owner}`;
-      case 'create_item':
-        return `${t.item} (${t.item_type || 'task'}) in ${t.project || 'N/A'}`;
-      case 'create_project_candidate':
-        return `new ${p.project_type || ''} project ${t.project || ''}`.trim();
-      case 'add_dependency':
-        return `${target} depends on ${p.predecessor}`;
-      case 'delete_item':
-        return `delete ${target}`;
-      case 'update_item': {
-        const bits = [];
-        if (p.new_name && p.new_name !== 'N/A') bits.push(`rename → ${p.new_name}`);
-        if (p.duration && p.duration !== 'N/A') bits.push(`duration ${p.duration}d`);
-        if (p.budget && p.budget !== 'N/A')     bits.push(`budget ${p.budget}`);
-        return `${target} — ${bits.join(', ') || '(no change)'}`;
-      }
-      case 'query_schedule':
-        return `query ${target}`;
-      default:
-        return target || op.operation;
+      case 'create_item':              body = aiRenderCardCreateItem(stashId, op, idx); break;
+      case 'add_dependency':           body = aiRenderCardAddDep(stashId, op, idx);     break;
+      case 'assign_owner':             body = aiRenderCardAssignOwner(stashId, op, idx); break;
+      case 'shift_item':               body = aiRenderCardShift(stashId, op, idx);      break;
+      case 'update_progress':          body = aiRenderCardProgress(stashId, op, idx);   break;
+      case 'delete_item':              body = aiRenderCardDelete(stashId, op, idx);     break;
+      case 'update_item':              body = aiRenderCardUpdate(stashId, op, idx);     break;
+      case 'query_schedule':           body = aiRenderCardQuery(stashId, op, idx);      break;
+      case 'create_project_candidate': body = aiRenderCardCandidate(stashId, op, idx);  break;
+      default:                         body = `<div style="color:#6b7280;">(${aiEscapeHtml(op.operation)})</div>`;
     }
+    return `<div class="ai-batch-card${op._skip ? ' skipped' : ''}">
+      <div class="ai-batch-card-head">
+        <span class="ai-batch-card-num">#${idx + 1}</span>
+        ${opSelect}
+        <label class="ai-batch-skip"><input type="checkbox" ${skipChecked} onchange="aiOnBatchToggleSkip('${stashId}',${idx},this.checked)"> skip</label>
+      </div>
+      ${body}
+    </div>`;
+  }
+
+  // Helpers — small DOM-string builders.
+  function aiSelect(field, idx, stashId, options, current, opts) {
+    const id = `${stashId}-${idx}-${field}`;
+    const onchange = `aiOnBatchEdit('${stashId}',${idx},'${field}',this.value)`;
+    const placeholder = (opts && opts.placeholder) ? `<option value="">${aiEscapeHtml(opts.placeholder)}</option>` : '';
+    const opts2 = options.map(([v, lbl]) => {
+      const sel = String(v) === String(current || '') ? ' selected' : '';
+      return `<option value="${aiEscapeAttr(v)}"${sel}>${aiEscapeHtml(lbl)}</option>`;
+    }).join('');
+    return `<select id="${id}" onchange="${onchange}">${placeholder}${opts2}</select>`;
+  }
+  function aiTextInput(field, idx, stashId, current, placeholder) {
+    const ph = placeholder ? ` placeholder="${aiEscapeAttr(placeholder)}"` : '';
+    return `<input type="text" value="${aiEscapeAttr(current || '')}"${ph} oninput="aiOnBatchEdit('${stashId}',${idx},'${field}',this.value)">`;
+  }
+  function aiRow(label, control) {
+    return `<div class="ai-batch-row"><label>${aiEscapeHtml(label)}</label>${control}</div>`;
+  }
+  // Build option arrays from the DRAFT (so cascading creates show up)
+  // when one exists, otherwise from real NODES.
+  function aiBatchNodes() { return AI.draft || NODES; }
+  function aiProjectOptions() {
+    return aiBatchNodes()
+      .filter(n => typeFromId(n.id) === 'project')
+      .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
+      .map(n => [n.id, `${n.id} — ${n.name || '(unnamed)'}`]);
+  }
+  function aiTasksInProject(projectId) {
+    if (!projectId) return [];
+    return aiBatchNodes()
+      .filter(n => parentOf(n.id) === projectId)
+      .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
+      .map(n => [n.id, `${n.id} — ${n.name || '(unnamed)'}`]);
+  }
+  function aiItemsInProject(projectId) {
+    if (!projectId) return [];
+    return aiBatchNodes()
+      .filter(n => n.id !== projectId && n.id.split('-')[0] === projectId)
+      .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
+      .map(n => [n.id, `${n.id} — ${n.name || '(unnamed)'} (${typeFromId(n.id)})`]);
+  }
+  function aiOwnerOptions() {
+    const set = new Set();
+    for (const n of aiBatchNodes()) { const o = (n.owner || '').trim(); if (o) set.add(o); }
+    return [...set].sort().map(o => [o, o]);
+  }
+  // Resolve a project id from the op state. Prefers a pinned id, then a
+  // pre-existing match against target.project, then the first project.
+  function aiResolveBatchProject(op) {
+    if (op.target._pinnedProjectId) return op.target._pinnedProjectId;
+    const projects = aiBatchNodes().filter(n => typeFromId(n.id) === 'project');
+    if (!projects.length) return '';
+    if (op.target.project && op.target.project !== 'N/A') {
+      const pm = aiMatchProject(op.target.project, aiBatchNodes(), { ignoreScope: true });
+      if (pm.confident) return pm.confident.id;
+      if (pm.candidates.length) return pm.candidates[0].id;
+    }
+    return projects[0].id;
+  }
+  // Resolve an item id (task/subtask) from op state, scoped to a project.
+  function aiResolveBatchItem(op, projectId) {
+    if (op.target._pinnedId) return op.target._pinnedId;
+    const project = aiBatchNodes().find(n => n.id === projectId);
+    if (op.target.item && op.target.item !== 'N/A' && project) {
+      const im = aiMatchItem(op.target.item, aiBatchNodes(), project, op.target.item_type, { ignoreScope: true });
+      if (im.confident) return im.confident.id;
+      if (im.candidates.length) return im.candidates[0].id;
+    }
+    return '';
+  }
+
+  // --- per-op card bodies ---
+  function aiRenderCardCreateItem(stashId, op, idx) {
+    const TYPES = [['project','project'],['task','task'],['subtask','subtask']];
+    const type = op.target.item_type === 'project' || op.target.item_type === 'task' || op.target.item_type === 'subtask'
+      ? op.target.item_type : 'task';
+    const rows = [aiRow('Type', aiSelect('item_type', idx, stashId, TYPES, type))];
+    if (type !== 'project') {
+      const projId = aiResolveBatchProject(op);
+      op.target._pinnedProjectId = projId; // cache for subsequent fields
+      rows.push(aiRow('Project', aiSelect('project', idx, stashId, aiProjectOptions(), projId)));
+      if (type === 'subtask') {
+        const tasks = aiTasksInProject(projId).filter(([id]) => typeFromId(id) === 'task');
+        const parentId = op.target._pinnedParentId
+          || (op.target.parent && op.target.parent !== 'N/A'
+              ? (tasks.find(([id, lbl]) => lbl.toLowerCase().includes(String(op.target.parent).toLowerCase())) || [])[0]
+              : '')
+          || (tasks[0] && tasks[0][0]) || '';
+        op.target._pinnedParentId = parentId;
+        rows.push(aiRow('Under task', aiSelect('parent', idx, stashId, tasks, parentId)));
+      }
+    }
+    rows.push(aiRow('Name', aiTextInput('item', idx, stashId, op.target.item, `new ${type} name`)));
+    const ownerOpts = aiOwnerOptions();
+    const ownerCurrent = (op.parameters.owner && op.parameters.owner !== 'N/A') ? op.parameters.owner : '';
+    rows.push(aiRow('Owner', aiSelect('owner', idx, stashId,
+      [['', '(none)'], ...ownerOpts, ['__new__', '＋ new owner…']], ownerCurrent)));
+    if (op.parameters.owner === '__new__' || op.parameters._ownerNewMode) {
+      rows.push(aiRow('New owner', aiTextInput('ownerNew', idx, stashId, op.parameters._ownerNew, 'e.g. Jane Doe')));
+    }
+    // Predecessors as a single comma/and-separated string. aiNormalisePredNames
+    // splits this back into an array at apply time. Editing this field updates
+    // parameters.predecessors (the array form) so cascading creates work.
+    const predList = Array.isArray(op.parameters.predecessors)
+      ? op.parameters.predecessors.join(', ')
+      : (op.parameters.predecessor && op.parameters.predecessor !== 'N/A'
+          ? op.parameters.predecessor
+          : '');
+    rows.push(aiRow('Predecessors',
+      aiTextInput('predecessors', idx, stashId, predList,
+        type === 'project' ? 'usually none for projects' : 'e.g. solar, inverter install')));
+    return rows.join('');
+  }
+
+  function aiRenderCardAddDep(stashId, op, idx) {
+    const projId = aiResolveBatchProject(op);
+    op.target._pinnedProjectId = projId;
+    const itemId = aiResolveBatchItem(op, projId);
+    op.target._pinnedId = itemId;
+    const items = aiItemsInProject(projId);
+    const preds = items.filter(([id]) => id !== itemId);
+    const predId = op.parameters._pinnedPredId
+      || (op.parameters.predecessor && op.parameters.predecessor !== 'N/A'
+          ? (preds.find(([id, lbl]) => lbl.toLowerCase().includes(String(op.parameters.predecessor).toLowerCase())) || [])[0]
+          : '')
+      || '';
+    op.parameters._pinnedPredId = predId;
+    return [
+      aiRow('Project',     aiSelect('project', idx, stashId, aiProjectOptions(), projId)),
+      aiRow('Item',        aiSelect('item',    idx, stashId, items, itemId)),
+      aiRow('Predecessor', aiSelect('predecessor', idx, stashId, preds, predId)),
+    ].join('');
+  }
+
+  function aiRenderCardAssignOwner(stashId, op, idx) {
+    const projId = aiResolveBatchProject(op);
+    op.target._pinnedProjectId = projId;
+    const itemId = aiResolveBatchItem(op, projId);
+    op.target._pinnedId = itemId;
+    const ownerOpts = aiOwnerOptions();
+    const ownerCurrent = (op.parameters.owner && op.parameters.owner !== 'N/A')
+      ? (ownerOpts.find(([n]) => n.toLowerCase() === String(op.parameters.owner).toLowerCase())?.[0]
+         || op.parameters.owner)
+      : '';
+    return [
+      aiRow('Project', aiSelect('project', idx, stashId, aiProjectOptions(), projId)),
+      aiRow('Item',    aiSelect('item',    idx, stashId, aiItemsInProject(projId), itemId)),
+      aiRow('Owner',   aiSelect('owner',   idx, stashId,
+        [['', '(none)'], ...ownerOpts, ['__new__', '＋ new owner…']], ownerCurrent)),
+      (op.parameters.owner === '__new__'
+        ? aiRow('New owner', aiTextInput('ownerNew', idx, stashId, op.parameters._ownerNew, 'e.g. Jane Doe'))
+        : ''),
+    ].join('');
+  }
+
+  function aiRenderCardShift(stashId, op, idx) {
+    const projId = aiResolveBatchProject(op);
+    op.target._pinnedProjectId = projId;
+    const itemId = aiResolveBatchItem(op, projId);
+    op.target._pinnedId = itemId;
+    return [
+      aiRow('Project',   aiSelect('project',   idx, stashId, aiProjectOptions(), projId)),
+      aiRow('Item',      aiSelect('item',      idx, stashId, aiItemsInProject(projId), itemId)),
+      aiRow('Direction', aiSelect('direction', idx, stashId, [['later','later'],['earlier','earlier']], op.parameters.direction || 'later')),
+      aiRow('Amount',    aiTextInput('amount', idx, stashId, op.parameters.amount, 'e.g. 2')),
+      aiRow('Unit',      aiSelect('unit',      idx, stashId, [['days','days'],['weeks','weeks'],['months','months']], op.parameters.unit || 'days')),
+    ].join('');
+  }
+
+  function aiRenderCardProgress(stashId, op, idx) {
+    const projId = aiResolveBatchProject(op);
+    op.target._pinnedProjectId = projId;
+    const itemId = aiResolveBatchItem(op, projId);
+    op.target._pinnedId = itemId;
+    return [
+      aiRow('Project', aiSelect('project', idx, stashId, aiProjectOptions(), projId)),
+      aiRow('Item',    aiSelect('item',    idx, stashId, aiItemsInProject(projId), itemId)),
+      aiRow('% done',  aiTextInput('percent_done', idx, stashId, op.parameters.percent_done, '0–100')),
+    ].join('');
+  }
+
+  function aiRenderCardDelete(stashId, op, idx) {
+    const projId = aiResolveBatchProject(op);
+    op.target._pinnedProjectId = projId;
+    const itemId = aiResolveBatchItem(op, projId);
+    op.target._pinnedId = itemId;
+    return [
+      aiRow('Project', aiSelect('project', idx, stashId, aiProjectOptions(), projId)),
+      aiRow('Item',    aiSelect('item',    idx, stashId, [[projId, `${projId} (entire project)`], ...aiItemsInProject(projId)], itemId || projId)),
+    ].join('');
+  }
+
+  function aiRenderCardUpdate(stashId, op, idx) {
+    const projId = aiResolveBatchProject(op);
+    op.target._pinnedProjectId = projId;
+    const itemId = aiResolveBatchItem(op, projId);
+    op.target._pinnedId = itemId;
+    return [
+      aiRow('Project',  aiSelect('project',  idx, stashId, aiProjectOptions(), projId)),
+      aiRow('Item',     aiSelect('item',     idx, stashId, aiItemsInProject(projId), itemId)),
+      aiRow('New name', aiTextInput('new_name', idx, stashId, op.parameters.new_name)),
+      aiRow('Duration', aiTextInput('duration', idx, stashId, op.parameters.duration, 'days')),
+      aiRow('Budget',   aiTextInput('budget',   idx, stashId, op.parameters.budget, 'e.g. $50k')),
+    ].join('');
+  }
+
+  function aiRenderCardQuery(stashId, op, idx) {
+    const projId = aiResolveBatchProject(op);
+    op.target._pinnedProjectId = projId;
+    const itemId = aiResolveBatchItem(op, projId);
+    op.target._pinnedId = itemId;
+    return [
+      aiRow('Project', aiSelect('project', idx, stashId, aiProjectOptions(), projId)),
+      aiRow('Item',    aiSelect('item',    idx, stashId, aiItemsInProject(projId), itemId)),
+    ].join('');
+  }
+
+  function aiRenderCardCandidate(stashId, op, idx) {
+    // The candidate flow has its own template/window pickers — the editor
+    // here just lets the user fix the surface fields. Other params route
+    // through aiHandleProjectCandidate when applied.
+    return [
+      aiRow('Name',       aiTextInput('candName',      idx, stashId, op.target.project, 'project name')),
+      aiRow('Type',       aiTextInput('project_type',  idx, stashId, op.parameters.project_type, 'e.g. solar, BESS')),
+      aiRow('Pref start', aiTextInput('preferred_start', idx, stashId, op.parameters.preferred_start)),
+      aiRow('Deadline',   aiTextInput('deadline',      idx, stashId, op.parameters.deadline)),
+    ].join('');
+  }
+
+  // Mutate the stashed op when a field changes, then re-render the editor.
+  function aiOnBatchEdit(stashId, idx, field, value) {
+    const stash = AI.clarifications[stashId];
+    if (!stash) return;
+    const op = stash.ops[idx];
+    if (!op) return;
+    switch (field) {
+      case 'operation':
+        op.operation = value;
+        // Clear pinned ids so the new op type re-resolves on next render.
+        op.target._pinnedId = undefined;
+        op.target._pinnedParentId = undefined;
+        op.target._pinnedProjectId = undefined;
+        op.parameters._pinnedPredId = undefined;
+        break;
+      case 'item_type':
+        op.target.item_type = value;
+        op.target._pinnedParentId = undefined;
+        break;
+      case 'project':
+        op.target._pinnedProjectId = value;
+        // Project changed → item / parent / predecessor references stale.
+        op.target._pinnedId = undefined;
+        op.target._pinnedParentId = undefined;
+        op.parameters._pinnedPredId = undefined;
+        // Update target.project to the chosen project's NAME so any later
+        // resolver path (e.g. on commit when _pinnedProjectId is unused)
+        // still hits the right project.
+        {
+          const p = aiBatchNodes().find(n => n.id === value);
+          if (p) op.target.project = p.name || value;
+        }
+        break;
+      case 'parent':
+        op.target._pinnedParentId = value;
+        break;
+      case 'item':
+        op.target._pinnedId = value;
+        // For create_item, "Name" maps to op.target.item (text field uses
+        // field='item' too) — only set the pinned id for non-create ops.
+        if (op.operation !== 'create_item') {
+          const n = aiBatchNodes().find(x => x.id === value);
+          if (n) op.target.item = n.name || value;
+        } else {
+          // create_item uses the typed string directly.
+          op.target.item = value;
+        }
+        break;
+      case 'predecessor':
+        op.parameters._pinnedPredId = value;
+        {
+          const n = aiBatchNodes().find(x => x.id === value);
+          if (n) op.parameters.predecessor = n.name || value;
+        }
+        break;
+      case 'predecessors':
+        // Free-text list — split on commas / "and" so the create_item
+        // applier can resolve each name. Stored as the array form.
+        op.parameters.predecessors = aiNormalisePredNames(value);
+        // Keep the singular field in sync for back-compat with non-create ops.
+        if (op.operation !== 'create_item') {
+          op.parameters.predecessor = op.parameters.predecessors[0] || 'N/A';
+        }
+        break;
+      case 'owner':
+        op.parameters.owner = value;
+        // Existing owner picked → mark resolved so the gate doesn't fire.
+        op.parameters._ownerResolved = !!value && value !== '__new__';
+        op.parameters._ownerNewMode  = value === '__new__';
+        if (!op.parameters._ownerNewMode) op.parameters._ownerNew = '';
+        break;
+      case 'ownerNew':
+        op.parameters._ownerNew = value;
+        op.parameters.owner = value;
+        op.parameters._ownerResolved = false; // user is making a NEW owner
+        break;
+      case 'candName':
+        op.target.project = value;
+        break;
+      default:
+        op.parameters[field] = value;
+    }
+    aiRenderBatchEditor(stashId);
+  }
+
+  function aiOnBatchToggleSkip(stashId, idx, skipped) {
+    const stash = AI.clarifications[stashId];
+    if (!stash) return;
+    const op = stash.ops[idx];
+    if (!op) return;
+    op._skip = !!skipped;
+    aiRenderBatchEditor(stashId);
   }
 
   function aiOnBatchApply(stashId) {
     const stash = AI.clarifications[stashId];
     if (!stash) return;
     const wrapEl = document.querySelector(`.ai-clarify[data-stash="${stashId}"]`);
-    if (!wrapEl) return;
-    const checked = [...wrapEl.querySelectorAll('input[type="checkbox"]')]
-      .filter(cb => cb.checked).map(cb => parseInt(cb.dataset.idx, 10));
-    const picked = checked.map(i => stash.ops[i]).filter(Boolean);
-    wrapEl.remove();
+    if (wrapEl) wrapEl.remove();
     delete AI.clarifications[stashId];
+    const picked = stash.ops.filter(o => !o._skip);
     if (!picked.length) {
       aiAppendMessage('assistant', 'No operations selected.');
       return;
     }
     aiAppendMessage('user', `→ apply ${picked.length} of ${stash.ops.length}`);
-    AI.opQueue = picked.slice(1); // first one dispatched immediately
+    AI.opQueue = picked.slice(1);
     AI.opSourceText = stash.sourceText;
     aiDispatchOp(picked[0], stash.sourceText);
   }
@@ -7501,10 +8072,10 @@ Phase                                Dur (d)   Predecessor
     wrap.dataset.stash = stashId;
     let html = `<div>${aiEscapeHtml(reason || 'Did you mean…')}</div><div class="ai-cand-row">`;
     for (const c of candidates) {
-      const sub = `<span class="ai-cand-id">${aiEscapeHtml(c.email || '')}</span>`;
-      html += `<button class="ai-cand-btn" onclick="aiOnOwnerPick('${stashId}','${aiEscapeAttr(c.displayName)}')">${aiEscapeHtml(c.displayName)} ${sub}</button>`;
+      const sub = `<span class="ai-cand-id">owns ${c.count} task${c.count === 1 ? '' : 's'}</span>`;
+      html += `<button class="ai-cand-btn" onclick="aiOnOwnerPick('${stashId}','${aiEscapeAttr(c.name)}')">${aiEscapeHtml(c.name)} ${sub}</button>`;
     }
-    html += `<button class="ai-cand-btn" onclick="aiOnOwnerUseAsNew('${stashId}')">Use "${aiEscapeHtml(queriedName)}" as new <span class="ai-cand-id">freeform — no profile link</span></button>`;
+    html += `<button class="ai-cand-btn" onclick="aiOnOwnerUseAsNew('${stashId}')">Add "${aiEscapeHtml(queriedName)}" as a new owner <span class="ai-cand-id">no existing match</span></button>`;
     html += `<button class="ai-cand-btn ai-cand-cancel" onclick="aiOnCandidateCancel('${stashId}')">Cancel</button>`;
     html += `</div>`;
     wrap.innerHTML = html;
@@ -7512,15 +8083,15 @@ Phase                                Dur (d)   Predecessor
     log.scrollTop = log.scrollHeight;
   }
 
-  function aiOnOwnerPick(stashId, displayName) {
+  function aiOnOwnerPick(stashId, ownerName) {
     const stash = AI.clarifications[stashId];
     if (!stash) return;
     const op = stash.operation;
-    op.parameters.owner = displayName;
+    op.parameters.owner = ownerName;
     op.parameters._ownerResolved = true;
     document.querySelector(`.ai-clarify[data-stash="${stashId}"]`)?.remove();
     delete AI.clarifications[stashId];
-    aiAppendMessage('user', `→ owner ${displayName}`);
+    aiAppendMessage('user', `→ owner ${ownerName}`);
     aiDispatchOp(op, stash.sourceText);
   }
 
@@ -8103,10 +8674,15 @@ Phase                                Dur (d)   Predecessor
     log.scrollTop = log.scrollHeight;
   }
 
-  // Render the "what can the AI do?" panel into the chat log. Triggered by
-  // the ⓘ button in the panel header. Categorised so users can scan;
-  // examples are pulled from the same utterances used in the LLM examples.
+  // Toggle the "what can the AI do?" panel in the chat log. First click
+  // renders it; second click removes it (no stacking). Triggered by the
+  // ⓘ button in the panel header. Categorised so users can scan; examples
+  // are pulled from the same utterances used in the LLM examples.
   function aiShowCapabilities() {
+    const log = document.getElementById('ai-log');
+    if (!log) return;
+    const existing = log.querySelector('.ai-caps');
+    if (existing) { existing.remove(); return; }
     const html = `
       <h4>✏ Edit a task</h4>
       <ul>
@@ -8184,9 +8760,6 @@ Phase                                Dur (d)   Predecessor
     p.classList.toggle('open');
     if (p.classList.contains('open')) {
       setTimeout(() => document.getElementById('ai-input')?.focus(), 50);
-      // Warm the profiles cache so the first owner-related prompt doesn't
-      // pay the round-trip inside aiSubmitChange.
-      aiEnsureProfilesCache().catch(() => {});
     }
   }
 
@@ -8205,6 +8778,8 @@ Phase                                Dur (d)   Predecessor
   window.aiOnWindowPick      = aiOnWindowPick;
   window.aiOnBatchApply      = aiOnBatchApply;
   window.aiOnBatchCancel     = aiOnBatchCancel;
+  window.aiOnBatchEdit       = aiOnBatchEdit;
+  window.aiOnBatchToggleSkip = aiOnBatchToggleSkip;
   window.aiOnOwnerPick       = aiOnOwnerPick;
   window.aiOnOwnerUseAsNew   = aiOnOwnerUseAsNew;
   window.aiShowCapabilities  = aiShowCapabilities;

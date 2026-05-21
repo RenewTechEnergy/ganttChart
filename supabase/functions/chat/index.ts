@@ -56,6 +56,7 @@ type Parameters = {
   project_type: string;
   scheduling_goal: string;
   predecessor: string;
+  predecessors: string[];
   new_name: string;
   preferred_start: string;
 };
@@ -100,6 +101,7 @@ const fallbackExtraction: ExtractedOperation = {
     project_type: "N/A",
     scheduling_goal: "N/A",
     predecessor: "N/A",
+    predecessors: [],
     new_name: "N/A",
     preferred_start: "N/A",
   },
@@ -133,6 +135,14 @@ Hierarchy — this is critical, infer the right "item_type":
 
 For create_item: if the user says "task" → item_type="task". If they say "subtask" → "subtask". If they say "project" → "project". If they say only "add X to Y" without specifying, default to "task" with project=Y.
 
+Bundle cascading creates into ONE create_item op — do NOT split. When the user says "add subtask X under Y in Z, assign it to Billy and make the predecessor solar and inverter install", emit a SINGLE create_item with:
+  - target.item_type = "subtask", target.parent = "Y", target.project = "Z", target.item = X
+  - parameters.owner = "Billy"
+  - parameters.predecessors = ["solar", "inverter install"]   (use the ARRAY when the user mentions multiple predecessors; for one, use parameters.predecessor)
+Do NOT emit separate assign_owner / add_dependency ops in the same batch — the new row's id doesn't exist yet, so they would dangle. The client wires owner + predecessors at create time.
+
+If the user only says "new subtask" without giving a name, set target.item = "New subtask" and add "item name" to missing_fields. Do not block on the missing name.
+
 create_item vs create_project_candidate:
 - "create_item" is for unconditional creation. The user knows exactly what they want and where it goes. ("add a project called X", "add a task to project Y").
 - "create_project_candidate" is for scheduling SEARCH. The user wants the system to help fit a NEW project into the calendar. Triggers: "fit between other projects", "find a window for", "schedule a new …", "can we fit", "starting around …", mentions of project_type / capacity / preferred_start / deadline as decision inputs.
@@ -162,6 +172,7 @@ Output schema (every field is REQUIRED — never omit a key):
     "project_type":    "string | N/A",
     "scheduling_goal": "string | N/A",
     "predecessor":     "string | N/A",
+    "predecessors":    ["string", ...],
     "new_name":        "string | N/A",
     "preferred_start": "string | N/A"
   },
@@ -219,7 +230,13 @@ Output:
 
 Input: "add a subtask called confirm date under commissioning in Glossodia"
 Output:
-{"operations":[{"operation":"create_item","target":{"project":"Glossodia","item":"confirm date","item_type":"subtask","parent":"commissioning"},"parameters":{"direction":"N/A","amount":"N/A","unit":"N/A","date":"N/A","deadline":"N/A","duration":"N/A","owner":"N/A","status":"N/A","percent_done":"N/A","budget":"N/A","capacity":"N/A","project_type":"N/A","scheduling_goal":"N/A","predecessor":"N/A","new_name":"N/A","preferred_start":"N/A"},"reasoning":{"requires_schedule_computation":true,"requires_dependency_check":true,"requires_capacity_check":false,"requires_user_confirmation":true},"confidence":"high","needs_clarification":false,"missing_fields":[]}]}
+{"operations":[{"operation":"create_item","target":{"project":"Glossodia","item":"confirm date","item_type":"subtask","parent":"commissioning"},"parameters":{"direction":"N/A","amount":"N/A","unit":"N/A","date":"N/A","deadline":"N/A","duration":"N/A","owner":"N/A","status":"N/A","percent_done":"N/A","budget":"N/A","capacity":"N/A","project_type":"N/A","scheduling_goal":"N/A","predecessor":"N/A","predecessors":[],"new_name":"N/A","preferred_start":"N/A"},"reasoning":{"requires_schedule_computation":true,"requires_dependency_check":true,"requires_capacity_check":false,"requires_user_confirmation":true},"confidence":"high","needs_clarification":false,"missing_fields":[]}]}
+
+Cascading create — owner + multiple predecessors bundled into one op:
+
+Input: "add new subtask under handover in Mulgrave, assign it to Billy and make the predecessor solar and inverter install"
+Output:
+{"operations":[{"operation":"create_item","target":{"project":"Mulgrave","item":"New subtask","item_type":"subtask","parent":"handover"},"parameters":{"direction":"N/A","amount":"N/A","unit":"N/A","date":"N/A","deadline":"N/A","duration":"N/A","owner":"Billy","status":"N/A","percent_done":"N/A","budget":"N/A","capacity":"N/A","project_type":"N/A","scheduling_goal":"N/A","predecessor":"N/A","predecessors":["solar","inverter install"],"new_name":"N/A","preferred_start":"N/A"},"reasoning":{"requires_schedule_computation":true,"requires_dependency_check":true,"requires_capacity_check":false,"requires_user_confirmation":true},"confidence":"medium","needs_clarification":true,"missing_fields":["item name"]}]}
 
 Read-only questions use "query_schedule" — DO NOT modify anything. Use it for "what's the progress of X", "when does X finish", "show me the status of X", "how is X going", "is X on track", "who owns X". The client renders a text summary, never a draft.
 
@@ -344,6 +361,10 @@ function normaliseOperation(value: unknown): ExtractedOperation {
   const unit: Parameters["unit"] =
     unitVal === "days" || unitVal === "weeks" || unitVal === "months" ? unitVal : "N/A";
 
+  const predecessors: string[] = Array.isArray(p.predecessors)
+    ? p.predecessors.filter(isStr).map((s) => s.trim()).filter((s) => s && s !== "N/A")
+    : [];
+
   const parameters: Parameters = {
     direction,
     amount: numOrNA(p.amount),
@@ -359,6 +380,7 @@ function normaliseOperation(value: unknown): ExtractedOperation {
     project_type: strOrNA(p.project_type),
     scheduling_goal: strOrNA(p.scheduling_goal),
     predecessor: strOrNA(p.predecessor),
+    predecessors,
     new_name: strOrNA(p.new_name),
     preferred_start: strOrNA(p.preferred_start),
   };
@@ -427,6 +449,7 @@ export default {
         messages?: Array<{ role?: string; content?: unknown }>;
         message?: string;
         model?: string;
+        boardContext?: string;
       };
 
       try {
@@ -500,6 +523,21 @@ export default {
         );
       }
 
+      // Optional board context — the client sends a compact summary of the
+      // projects currently in scope so the LLM can resolve hierarchy
+      // ("under handover & documentation") and pick the right item_type /
+      // parent without guessing. Capped at 8000 chars to bound tokens.
+      const boardContextRaw = typeof body.boardContext === "string" ? body.boardContext : "";
+      const boardContext = boardContextRaw.slice(0, 8000).trim();
+      const contextMessages = boardContext
+        ? [{
+            role: "system",
+            content:
+              "Current board state (use the IDs verbatim in `target.parent` or `parameters.predecessor` when the user names something already on the board). Items not listed here do not exist yet — for those, use create_item.\n\n" +
+              boardContext,
+          }]
+        : [];
+
       const upstream = await fetch(
         "https://openrouter.ai/api/v1/chat/completions",
         {
@@ -512,7 +550,7 @@ export default {
           },
           body: JSON.stringify({
             model: openrouterModel,
-            messages: [systemMessage, ...convo],
+            messages: [systemMessage, ...contextMessages, ...convo],
             temperature: 0,
             // 4000 is plenty for a multi-op batch (each op ≈ 700 chars ≈ 180
             // tokens, so up to ~20 ops). Single-op responses stop well early.

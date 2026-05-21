@@ -253,35 +253,30 @@ function aiMatchItem(query, nodes, projectNode, itemType) {
   return { id: null, candidates: top5 };
 }
 
-// Profiles stub — tests populate `_aiProfilesCache` directly via
-// setProfilesForTests() in the relevant scenario. Production loads it
-// lazily from Supa.listAllProfiles(); the matcher logic is identical.
-let _aiProfilesCache = [];
-function setProfilesForTests(list) { _aiProfilesCache = Array.isArray(list) ? list : []; }
-
 // index.html:6090 (test port) — fuzzy-match an owner string against the
-// cached profile list. Returns { confident, candidates } where each entry
-// has { user_id, email, role, displayName }.
-function aiMatchOwner(query) {
+// owners already in use across the board. Pool is the deduplicated set
+// of non-empty `owner` strings on nodes. Returns
+// { confident: <{name, count}|null>, candidates: [{name, count}, …] }.
+function aiMatchOwner(query, nodes) {
   if (!query || query === 'N/A') return { confident: null, candidates: [] };
-  const pool = _aiProfilesCache
-    .filter(p => p && p.email)
-    .map(p => ({
-      user_id: p.user_id, email: p.email, role: p.role,
-      displayName: String(p.email).split('@')[0],
-    }));
-  if (!pool.length) return { confident: null, candidates: [] };
-  const exact = pool.find(p => p.displayName.toLowerCase() === query.toLowerCase());
+  const tally = new Map();
+  for (const n of (nodes || [])) {
+    const o = (n.owner || '').trim();
+    if (!o) continue;
+    tally.set(o, (tally.get(o) || 0) + 1);
+  }
+  if (!tally.size) return { confident: null, candidates: [] };
+  const pool = [...tally.entries()].map(([name, count]) => ({ name, count }));
+  const exact = pool.find(p => p.name.toLowerCase() === query.toLowerCase());
   if (exact) return { confident: exact, candidates: [exact] };
   const q = query.toLowerCase();
   const hits = pool
-    .filter(p => p.displayName.toLowerCase().includes(q) || p.email.toLowerCase().includes(q))
+    .filter(p => p.name.toLowerCase().includes(q))
     .map(p => ({ item: p, score: 0 }));
   if (!hits.length) return { confident: null, candidates: [] };
   const top5 = hits.slice(0, 5).map(h => h.item);
-  // Mirror aiIsConfident: substring-only matcher (no Fuse) has score=0
-  // for every hit, so confidence == singleton hit. Anything ambiguous
-  // falls through to the candidates path.
+  // Substring-only matcher (no Fuse in tests): score=0 for every hit,
+  // so confidence == singleton hit. Multi-hit falls to candidates.
   return { confident: hits.length === 1 ? hits[0].item : null, candidates: top5 };
 }
 
@@ -410,14 +405,14 @@ function aiApplyOwner(op, draft) {
   const owner = (op.parameters.owner || '').trim();
   if (!owner || owner === 'N/A') return { ok: false, reason: 'No owner specified.' };
   if (!op.parameters._ownerResolved) {
-    const om = aiMatchOwner(owner);
+    const om = aiMatchOwner(owner, draft);
     if (om.confident) {
-      op.parameters.owner = om.confident.displayName;
+      op.parameters.owner = om.confident.name;
     } else if (om.candidates.length) {
       return {
         ok: false, kind: 'owner', candidates: om.candidates,
         queriedName: owner,
-        reason: `Multiple users match "${owner}". Pick one or use as new.`,
+        reason: `Which owner did you mean by "${owner}"?`,
       };
     }
   }
@@ -469,7 +464,128 @@ function aiApplyCreate(op, draft, parseDateNow) {
     est_cost: 0, cost_to_date: 0, sale_price: 0, collapsed: false,
   };
   draft.push(newNode);
-  return { ok: true, targetId: newId, created: newNode };
+  // Apply predecessors if the create_item op includes them (cascading
+  // creates like "add subtask X under Y, predecessor Z and W").
+  const predResult = aiResolveCreatePredecessors(op, draft, newNode);
+  if (!predResult.ok) {
+    const idx = draft.findIndex(n => n.id === newNode.id);
+    if (idx >= 0) draft.splice(idx, 1);
+    return {
+      ok: false,
+      reason: predResult.reason || 'Could not resolve predecessors for the new item.',
+      kind: 'none', candidates: [],
+    };
+  }
+  if (predResult.predIds.length) {
+    newNode.predecessors = predResult.predIds.join(', ');
+  }
+  return { ok: true, targetId: newId, created: newNode, predIds: predResult.predIds };
+}
+
+// index.html:6678 (test port) — normalise op.parameters.predecessors /
+// predecessor into a clean list of name strings.
+function aiNormalisePredNames(value) {
+  if (!value || value === 'N/A') return [];
+  if (Array.isArray(value)) return value.flatMap(v => aiNormalisePredNames(v)).filter(Boolean);
+  return String(value)
+    .split(/[,;]| and | & /i)
+    .map(s => s.trim())
+    .filter(Boolean)
+    .filter(s => s !== 'N/A');
+}
+
+// Build the breadcrumb pool — one entry per non-project node with a
+// flattened "<own name> <parent name> ... <project name>" string. Used
+// by aiBestItemMatchLoose so multi-word queries like "solar procurement"
+// can disambiguate sibling subtasks by their hierarchy.
+function aiBreadcrumbPool(nodes, projectNode) {
+  const byId = new Map(nodes.map(n => [n.id, n]));
+  const pool = [];
+  for (const n of nodes) {
+    if (typeFromId(n.id) === 'project') continue;
+    if (projectNode && n.id.split('-')[0] !== projectNode.id) continue;
+    const parts = [n.name || ''];
+    let cur = n;
+    while (true) {
+      const pid = parentOf(cur.id);
+      if (!pid) break;
+      const parent = byId.get(pid);
+      if (!parent) break;
+      parts.push(parent.name || '');
+      cur = parent;
+    }
+    pool.push({ item: n, name: n.name || '', breadcrumb: parts.filter(Boolean).join(' ') });
+  }
+  return pool;
+}
+
+// Token-overlap matcher (no Fuse in tests). Confident when one entry
+// strictly beats every other on number of query tokens present in its
+// breadcrumb. Production uses Fuse weighted toward the breadcrumb field.
+function aiBestItemMatchLoose(query, nodes, projectNode) {
+  if (!query || query === 'N/A') return { confident: null, candidates: [] };
+  const pool = aiBreadcrumbPool(nodes, projectNode);
+  if (!pool.length) return { confident: null, candidates: [] };
+  const idHit = pool.find(p => p.item.id.toLowerCase() === query.toLowerCase());
+  if (idHit) return { confident: idHit.item, candidates: [idHit.item] };
+  const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!tokens.length) return { confident: null, candidates: [] };
+  const scored = pool.map(p => {
+    const hay = p.breadcrumb.toLowerCase();
+    let hits = 0;
+    for (const t of tokens) if (hay.includes(t)) hits++;
+    return { item: p.item, hits };
+  }).filter(s => s.hits > 0).sort((a, b) => b.hits - a.hits);
+  if (!scored.length) return { confident: null, candidates: [] };
+  const best = scored[0];
+  const confident = (scored.length === 1 || best.hits > scored[1].hits) ? best.item : null;
+  return { confident, candidates: scored.slice(0, 5).map(s => s.item) };
+}
+
+// Resolve every predecessor in the op against the draft. Returns
+// { ok: true, predIds } on success; { ok: false, reason, unresolved } on
+// any missing/ambiguous/cyclic predecessor.
+function aiResolveCreatePredecessors(op, draft, newNode) {
+  const rawPreds = op.parameters.predecessors ?? op.parameters.predecessor;
+  const predNames = aiNormalisePredNames(rawPreds);
+  if (!predNames.length) return { ok: true, predIds: [] };
+  const projectId = newNode.id.split('-')[0];
+  const projectNode = draft.find(n => n.id === projectId);
+  const predIds = [];
+  const unresolved = [];
+  for (const name of predNames) {
+    const match = aiBestItemMatchLoose(name, draft, projectNode);
+    if (!match.confident) {
+      unresolved.push({ name, candidates: match.candidates || [] });
+      continue;
+    }
+    const pred = match.confident;
+    if (pred.id === newNode.id) {
+      unresolved.push({ name, reason: 'A new item cannot depend on itself.', candidates: [] });
+      continue;
+    }
+    if (aiPredCreatesCycle(draft, newNode.id, pred.id)) {
+      unresolved.push({ name, reason: `Adding ${pred.name} would create a circular dependency.`, candidates: [] });
+      continue;
+    }
+    if (!predIds.includes(pred.id)) predIds.push(pred.id);
+  }
+  if (unresolved.length) {
+    const lines = unresolved.map(u => {
+      if (u.reason) return `"${u.name}" — ${u.reason}`;
+      if (u.candidates && u.candidates.length) {
+        return `"${u.name}" matched multiple/uncertain tasks: ` +
+          u.candidates.map(c => `${c.id} ${c.name}`).join(', ');
+      }
+      return `"${u.name}" was not found`;
+    });
+    return {
+      ok: false,
+      reason: `Could not resolve predecessor${unresolved.length === 1 ? '' : 's'}:\n${lines.join('\n')}`,
+      unresolved,
+    };
+  }
+  return { ok: true, predIds };
 }
 
 // index.html:6536 — cycle check for add_dependency. Walks the predecessor
@@ -894,7 +1010,6 @@ function reset() {
   AI.draft = null;
   AI.baseSnapshot = null;
   AI.pendingChanges = [];
-  _aiProfilesCache = [];
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -1299,31 +1414,30 @@ describe('E · §2.6 — "Assign BESS procurement to Jack"', () => {
   });
 });
 
-describe('E · owner clarification — single profile match substitutes the local-part', () => {
-  it('"Jack" matches "jack.zhou@…" → owner is set to "jack.zhou" without prompting', () => {
+describe('E · owner clarification — single existing owner match substitutes the full name', () => {
+  it('"jack" matches "Jack Zhou" on the board → owner becomes "Jack Zhou" without prompting', () => {
     seedGlossodiaViaPrompts();
-    setProfilesForTests([{ user_id: 'u1', email: 'jack.zhou@team.local', role: 'user' }]);
-    const r = prompt(assignOwner('Glossodia', 'BESS', 'Jack'), 'Assign BESS to Jack');
+    // Seed an existing owner on a sibling task so the matcher has data.
+    NODES.find(n => n.id === 'P1-T1').owner = 'Jack Zhou';
+    const r = prompt(assignOwner('Glossodia', 'BESS', 'jack'), 'Assign BESS to jack');
     eq(r.ok, true, 'apply succeeded');
     approve();
-    eq(NODES.find(n => n.id === 'P1-T2').owner, 'jack.zhou',
-       'owner substituted to the matched profile local-part');
+    eq(NODES.find(n => n.id === 'P1-T2').owner, 'Jack Zhou',
+       'owner substituted to the matched existing owner name');
   });
 });
 
 describe('E · owner clarification — ambiguous query returns candidates, real NODES untouched', () => {
-  it('two "jack-*" profiles → kind:"owner" + candidates, NODES owner field unchanged', () => {
+  it('two "jack-*" owners on the board → kind:"owner" + candidates, NODES owner unchanged', () => {
     seedGlossodiaViaPrompts();
-    setProfilesForTests([
-      { user_id: 'u1', email: 'jack.zhou@team.local', role: 'user' },
-      { user_id: 'u2', email: 'jack.wong@team.local', role: 'user' },
-    ]);
+    NODES.find(n => n.id === 'P1-T1').owner = 'Jack Zhou';
+    NODES.find(n => n.id === 'P1-T3').owner = 'Jack Wong';
     const before = NODES.find(n => n.id === 'P1-T2').owner;
     const r = prompt(assignOwner('Glossodia', 'BESS', 'jack'), 'Assign BESS to jack');
     eq(r.ok, false, 'rejected pending clarification');
     eq(r.kind, 'owner', 'kind tagged so commit branches to owner picker');
-    ok(r.candidates && r.candidates.length === 2, 'both profiles surfaced as candidates');
-    eq(r.queriedName, 'jack', 'original query preserved for "use as new" button');
+    ok(r.candidates && r.candidates.length === 2, 'both owners surfaced as candidates');
+    eq(r.queriedName, 'jack', 'original query preserved for "add as new" button');
     // First-op rejection clears the draft via aiSubmitChangeSync — the
     // important guarantee is that real NODES are not mutated. (Production
     // keeps the draft alive because the clarification UI re-dispatches.)
@@ -1332,16 +1446,16 @@ describe('E · owner clarification — ambiguous query returns candidates, real 
   });
 });
 
-describe('E · owner clarification — no profile match falls through (today\'s behaviour)', () => {
-  it('"Jack" with no jack-* profile → freeform string is set, no prompt', () => {
+describe('E · owner clarification — no existing owner match falls through as new', () => {
+  it('"jack" with no jack-* on the board → freeform string is set, no prompt', () => {
     seedGlossodiaViaPrompts();
-    setProfilesForTests([{ user_id: 'u1', email: 'sarah.kim@team.local', role: 'user' }]);
+    NODES.find(n => n.id === 'P1-T1').owner = 'Sarah Kim';
     const r = prompt(assignOwner('Glossodia', 'BESS', 'Jack'),
-      'Assign BESS to Jack (no matching profile)');
+      'Assign BESS to Jack (no matching owner)');
     eq(r.ok, true, 'falls through with freeform owner');
     approve();
     eq(NODES.find(n => n.id === 'P1-T2').owner, 'Jack',
-       'freeform owner string preserved when no profile candidates exist');
+       'freeform owner string preserved when no candidates exist');
   });
 });
 
@@ -1537,6 +1651,177 @@ describe('H · delete_item', () => {
     eq(r.ok, true, 'delete_item should succeed');
     approve();
     ok(!NODES.find(n => n.id === 'P1-T2'), 'BESS row gone');
+  });
+});
+
+/* ═════════════════════════════════════════════════════════════════════════
+ * H · cascading create_item — owner + predecessors[] bundled into one op
+ *
+ *   The design pivot: instead of splitting "add subtask X under Y, owner
+ *   Billy, predecessor solar and inverter install" into 4 ops, the LLM
+ *   emits a single create_item carrying parameters.owner +
+ *   parameters.predecessors. aiResolveCreatePredecessors wires the
+ *   predecessors at create time, with rollback on any unresolved name.
+ * ═════════════════════════════════════════════════════════════════════════ */
+
+describe('H · create_item with parameters.predecessors[] wires preds at create time', () => {
+  it('new subtask under DA approval gets BESS delivery + Commissioning as preds', () => {
+    seedGlossodiaViaPrompts();
+    const r = prompt(rawOp('create_item',
+      { project: 'Glossodia', item: 'verification', item_type: 'subtask', parent: 'DA approval' },
+      { predecessors: ['BESS delivery', 'Commissioning'] },
+      { requires_schedule_computation: true, requires_dependency_check: true }),
+      'add verification subtask depending on BESS + Commissioning');
+    eq(r.ok, true, 'create with predecessors should succeed');
+    ok(r.predIds && r.predIds.length === 2, 'both predecessors resolved');
+    approve();
+    const created = NODES.find(n => /verification/i.test(n.name || ''));
+    ok(created, 'new subtask landed in NODES');
+    eq(typeFromId(created.id), 'subtask', 'item_type honoured — subtask not task');
+    const preds = parsePreds(created.predecessors).sort();
+    eq(preds, ['P1-T2', 'P1-T3'].sort(), 'predecessors set on the new row');
+  });
+});
+
+describe('H · create_item with comma-and-string predecessors', () => {
+  it('"BESS delivery and Commissioning" string parses and resolves to two preds', () => {
+    seedGlossodiaViaPrompts();
+    const r = prompt(rawOp('create_item',
+      { project: 'Glossodia', item: 'verification', item_type: 'subtask', parent: 'DA approval' },
+      // String form mimics what the LLM may emit when it forgets the array.
+      { predecessor: 'BESS delivery and Commissioning' },
+      { requires_dependency_check: true }),
+      'add verification subtask depending on BESS and Commissioning');
+    eq(r.ok, true, 'create succeeded after parsing the string list');
+    eq((r.predIds || []).length, 2, 'both predecessors resolved from the string');
+  });
+});
+
+describe('H · create_item rolls back when a predecessor cannot be resolved', () => {
+  it('unknown predecessor name → ok:false and no new row in the draft', () => {
+    seedGlossodiaViaPrompts();
+    const beforeIds = NODES.map(n => n.id).slice();
+    const r = prompt(rawOp('create_item',
+      { project: 'Glossodia', item: 'verification', item_type: 'subtask', parent: 'DA approval' },
+      { predecessors: ['BESS delivery', 'totally not a task'] },
+      { requires_dependency_check: true }),
+      'add verification subtask with one unknown predecessor');
+    eq(r.ok, false, 'rejected when any predecessor cannot be resolved');
+    ok(/not found|matched multiple|circular/i.test(r.reason || ''),
+       'reason mentions the unresolved predecessor');
+    // First-op rejection clears the draft. Real NODES must be untouched.
+    eq(NODES.map(n => n.id), beforeIds, 'no rollback fragments left in NODES');
+  });
+});
+
+describe('H · create_item — breadcrumb matcher disambiguates sibling names', () => {
+  it('"solar procurement" picks "Solar panels" under "Equipment Procurement" over "Solar install"', () => {
+    // Seed Mulgrave: T1 "Equipment Procurement" with S1 "Solar panels";
+    // T2 "Inverter install" with S1 "Solar install". Both start with
+    // "Solar", so the legacy name-only matcher would tie. The breadcrumb
+    // pool sees "solar panels equipment procurement mulgrave" vs
+    // "solar install inverter install mulgrave" and picks the right one.
+    reset();
+    NODES.push({ id: 'P1', type: 'project', name: 'Mulgrave',
+      sched_start: '2026-06-01', sched_end: '2026-12-31',
+      owner: '', predecessors: '', actual_start: '', actual_end: '',
+      slack: '', percent_done: 0, est_cost: 0, cost_to_date: 0,
+      sale_price: 0, collapsed: false });
+    NODES.push({ id: 'P1-T1', type: 'task', name: 'Equipment Procurement',
+      sched_start: '2026-06-01', sched_end: '2026-06-30',
+      owner: '', predecessors: '', actual_start: '', actual_end: '',
+      slack: '', percent_done: 0, est_cost: 0, cost_to_date: 0,
+      sale_price: 0, collapsed: false });
+    NODES.push({ id: 'P1-T1-S1', type: 'subtask', name: 'Solar panels',
+      sched_start: '2026-06-01', sched_end: '2026-06-15',
+      owner: '', predecessors: '', actual_start: '', actual_end: '',
+      slack: '', percent_done: 0, est_cost: 0, cost_to_date: 0,
+      sale_price: 0, collapsed: false });
+    NODES.push({ id: 'P1-T2', type: 'task', name: 'Inverter install',
+      sched_start: '2026-07-01', sched_end: '2026-07-31',
+      owner: '', predecessors: '', actual_start: '', actual_end: '',
+      slack: '', percent_done: 0, est_cost: 0, cost_to_date: 0,
+      sale_price: 0, collapsed: false });
+    NODES.push({ id: 'P1-T2-S1', type: 'subtask', name: 'Solar install',
+      sched_start: '2026-07-01', sched_end: '2026-07-15',
+      owner: '', predecessors: '', actual_start: '', actual_end: '',
+      slack: '', percent_done: 0, est_cost: 0, cost_to_date: 0,
+      sale_price: 0, collapsed: false });
+    // Also add a "Handover" task so the new subtask has a parent.
+    NODES.push({ id: 'P1-T3', type: 'task', name: 'Handover',
+      sched_start: '2026-08-01', sched_end: '2026-08-15',
+      owner: '', predecessors: '', actual_start: '', actual_end: '',
+      slack: '', percent_done: 0, est_cost: 0, cost_to_date: 0,
+      sale_price: 0, collapsed: false });
+
+    const r = prompt(rawOp('create_item',
+      { project: 'Mulgrave', item: 'test1', item_type: 'subtask', parent: 'Handover' },
+      { predecessors: ['solar procurement'] },
+      { requires_dependency_check: true }),
+      'add test1 subtask depending on solar procurement');
+    eq(r.ok, true, 'create succeeded — breadcrumb disambiguated');
+    eq(r.predIds, ['P1-T1-S1'],
+       'predecessor resolved to Solar panels under Equipment Procurement');
+  });
+});
+
+describe('H · create_item — breadcrumb matcher leaves ambiguous queries unresolved', () => {
+  it('"solar" alone is ambiguous between two siblings → ok:false', () => {
+    reset();
+    NODES.push({ id: 'P1', type: 'project', name: 'Mulgrave',
+      sched_start: '2026-06-01', sched_end: '2026-12-31',
+      owner: '', predecessors: '', actual_start: '', actual_end: '',
+      slack: '', percent_done: 0, est_cost: 0, cost_to_date: 0,
+      sale_price: 0, collapsed: false });
+    NODES.push({ id: 'P1-T1', type: 'task', name: 'Equipment Procurement',
+      sched_start: '2026-06-01', sched_end: '2026-06-30',
+      owner: '', predecessors: '', actual_start: '', actual_end: '',
+      slack: '', percent_done: 0, est_cost: 0, cost_to_date: 0,
+      sale_price: 0, collapsed: false });
+    NODES.push({ id: 'P1-T1-S1', type: 'subtask', name: 'Solar panels',
+      sched_start: '2026-06-01', sched_end: '2026-06-15',
+      owner: '', predecessors: '', actual_start: '', actual_end: '',
+      slack: '', percent_done: 0, est_cost: 0, cost_to_date: 0,
+      sale_price: 0, collapsed: false });
+    NODES.push({ id: 'P1-T2', type: 'task', name: 'Inverter install',
+      sched_start: '2026-07-01', sched_end: '2026-07-31',
+      owner: '', predecessors: '', actual_start: '', actual_end: '',
+      slack: '', percent_done: 0, est_cost: 0, cost_to_date: 0,
+      sale_price: 0, collapsed: false });
+    NODES.push({ id: 'P1-T2-S1', type: 'subtask', name: 'Solar install',
+      sched_start: '2026-07-01', sched_end: '2026-07-15',
+      owner: '', predecessors: '', actual_start: '', actual_end: '',
+      slack: '', percent_done: 0, est_cost: 0, cost_to_date: 0,
+      sale_price: 0, collapsed: false });
+    NODES.push({ id: 'P1-T3', type: 'task', name: 'Handover',
+      sched_start: '2026-08-01', sched_end: '2026-08-15',
+      owner: '', predecessors: '', actual_start: '', actual_end: '',
+      slack: '', percent_done: 0, est_cost: 0, cost_to_date: 0,
+      sale_price: 0, collapsed: false });
+    const r = prompt(rawOp('create_item',
+      { project: 'Mulgrave', item: 'test1', item_type: 'subtask', parent: 'Handover' },
+      { predecessors: ['solar'] },
+      { requires_dependency_check: true }),
+      'add test1 with ambiguous solar predecessor');
+    eq(r.ok, false, 'rejected — "solar" matches multiple siblings');
+    ok(/multiple|not found/i.test(r.reason || ''),
+       'reason cites ambiguity');
+  });
+});
+
+describe('H · create_item with empty predecessors[] behaves like the legacy create', () => {
+  it('no preds in op → row created with empty predecessors string', () => {
+    seedGlossodiaViaPrompts();
+    const r = prompt(rawOp('create_item',
+      { project: 'Glossodia', item: 'documentation', item_type: 'task' },
+      { predecessors: [] },
+      { requires_schedule_computation: true }),
+      'add documentation task with no preds');
+    eq(r.ok, true);
+    approve();
+    const created = NODES.find(n => /documentation/i.test(n.name || ''));
+    ok(created, 'task created');
+    eq(created.predecessors, '', 'empty predecessors string when none supplied');
   });
 });
 
