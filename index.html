@@ -776,15 +776,26 @@ Click ⓘ in the header for the full list of things I can do.</div>
   <script type="module">
     import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-    const SUPABASE_URL              = "https://gdliekkwgsffeufraphk.supabase.co";
-    const SUPABASE_PUBLISHABLE_KEY  = "sb_publishable_Nkpe931Zpj0Ghhm2x3WCmQ_7U_8UxvD";
+    // Centralised Supabase + edge-function config. All HTTP calls in this
+    // module read from here; do NOT introduce ad-hoc URLs elsewhere.
+    //
+    // To develop against local supabase: set useLocalEdge to true AND make sure
+    // `supabase start` + `supabase functions serve chat` are running. The
+    // local publishable key comes from `supabase status` and changes when
+    // the local stack is reset.
+    //
+    // To run against cloud: leave useLocalEdge as false. Cloud uses the
+    // publishable key + project URL.
+    const SUPA_CONFIG = {
+      supabaseUrl:         "https://gdliekkwgsffeufraphk.supabase.co",
+      publishableKey:      "sb_publishable_Nkpe931Zpj0Ghhm2x3WCmQ_7U_8UxvD",
+      localFunctionsBase:  "http://127.0.0.1:54321",
+      localPublishableKey: "sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH",
+      useLocalEdge:        false,
+    };
 
-    // Edge-function base. Empty string → use SUPABASE_URL (cloud).
-    // Set to "http://127.0.0.1:54321" when running `supabase functions serve chat` locally.
-    // The matching publishable key (from `supabase status`) goes in LOCAL_FUNCTIONS_KEY
-    // because Kong on the local stack rejects the cloud apikey.
-    const LOCAL_FUNCTIONS_BASE      = "http://127.0.0.1:54321";
-    const LOCAL_FUNCTIONS_KEY       = "sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH";
+    const SUPABASE_URL             = SUPA_CONFIG.supabaseUrl;
+    const SUPABASE_PUBLISHABLE_KEY = SUPA_CONFIG.publishableKey;
 
     // Wrap fetch so every Supabase HTTP call is visible in the console with
     // method, path, status, duration, and the tab/network state at request time.
@@ -1834,11 +1845,11 @@ Click ⓘ in the header for the full list of things I can do.</div>
     // Optional boardContext is a short text summary of the current board —
     // injected as a second system message so the LLM can resolve hierarchy.
     async function invokeChat(messageOrMessages, model, boardContext) {
-      const useLocal = !!LOCAL_FUNCTIONS_BASE;
-      const base     = useLocal ? LOCAL_FUNCTIONS_BASE : SUPABASE_URL;
-      const apikey   = useLocal ? LOCAL_FUNCTIONS_KEY  : SUPABASE_PUBLISHABLE_KEY;
+      const useLocal = SUPA_CONFIG.useLocalEdge === true;
+      const base     = useLocal ? SUPA_CONFIG.localFunctionsBase  : SUPA_CONFIG.supabaseUrl;
+      const apikey   = useLocal ? SUPA_CONFIG.localPublishableKey : SUPA_CONFIG.publishableKey;
       const url      = `${base}/functions/v1/chat`;
-      const token    = useLocal ? apikey : (supaToken || SUPABASE_PUBLISHABLE_KEY);
+      const token    = useLocal ? apikey : (supaToken || SUPA_CONFIG.publishableKey);
       const payload  = { model: model || "haiku" };
       if (Array.isArray(messageOrMessages)) payload.messages = messageOrMessages;
       else payload.message = messageOrMessages;
