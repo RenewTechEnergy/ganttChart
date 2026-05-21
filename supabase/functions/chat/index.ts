@@ -11,6 +11,22 @@ import {
   parseCompletion,
 } from "./schema.ts";
 import { openrouterProvider } from "./providers/openrouter.ts";
+import { anthropicProvider } from "./providers/anthropic.ts";
+import type { Provider } from "./providers/types.ts";
+
+const PROVIDERS: Record<string, Provider> = {
+  openrouter: openrouterProvider,
+  anthropic:  anthropicProvider,
+};
+
+function selectProvider(): Provider {
+  const name = (Deno.env.get("LLM_PROVIDER") ?? "openrouter").toLowerCase();
+  const p = PROVIDERS[name];
+  if (!p) {
+    throw new Error(`Unknown LLM_PROVIDER "${name}". Set it to one of: ${Object.keys(PROVIDERS).join(", ")}`);
+  }
+  return p;
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -103,7 +119,17 @@ export default {
       const boardContextRaw = typeof body.boardContext === "string" ? body.boardContext : "";
       const boardContext = boardContextRaw.slice(0, 8000).trim();
 
-      const result = await openrouterProvider.chat({
+      let provider: Provider;
+      try {
+        provider = selectProvider();
+      } catch (err) {
+        return new Response(
+          JSON.stringify({ error: err instanceof Error ? err.message : "Provider selection failed" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      const result = await provider.chat({
         model: requestedModel,
         conversation: convo,
         boardContext,
@@ -112,7 +138,7 @@ export default {
       if (!result.ok) {
         return new Response(
           JSON.stringify({
-            error: `${openrouterProvider.name} request failed`,
+            error: `${provider.name} request failed`,
             status: result.status,
             details: result.error,
           }),
