@@ -310,7 +310,7 @@ it('CPM reports a cycle when two leaves are mutual predecessors', () => {
 
 ## 10. Coverage matrix (round one)
 
-Target: ~40–50 tests across these suites.
+Target: ~90–100 tests across these suites. The formatters suite is heavy because the existing `test_index.js` already has dense per-function coverage (e.g., 9 `clampPercent` cases, 8 `esc` cases) which we port verbatim.
 
 | Suite | Scenarios | Approx count |
 |---|---|---|
@@ -351,10 +351,12 @@ jobs:
   "name": "gantt-chart-tests",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node --test tests/gantt.test.js" },
+  "scripts": { "test": "node --test 'tests/*.test.js'" },
   "devDependencies": { "jsdom": "^25.0.0" }
 }
 ```
+
+The glob picks up `tests/gantt.test.js` today and any future split files (see §12) without further script changes.
 
 `.gitignore` (append):
 ```
