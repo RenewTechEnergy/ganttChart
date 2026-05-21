@@ -227,6 +227,16 @@
     .ai-x { background: transparent; border: none; font-size: 22px; line-height: 1;
       cursor: pointer; color: #9ca3af; padding: 0 4px; }
     .ai-x:hover { color: #111827; }
+    .ai-help-btn { background: transparent; border: none; font-size: 18px;
+      line-height: 1; cursor: pointer; color: #9ca3af; padding: 0 6px; }
+    .ai-help-btn:hover { color: #5b21b6; }
+    .ai-caps { background: #f5f3ff; border: 1px solid #ddd6fe;
+      align-self: stretch; color: #1f2937; font-size: 11px; line-height: 1.55; }
+    .ai-caps h4 { font-size: 12px; font-weight: 700; color: #5b21b6;
+      margin: 6px 0 4px; }
+    .ai-caps ul { margin: 0 0 6px; padding-left: 18px; }
+    .ai-caps li { margin: 2px 0; }
+    .ai-caps li em { color: #6b7280; font-style: normal; }
     .ai-log { flex: 1; padding: 12px 14px; overflow-y: auto;
       display: flex; flex-direction: column; gap: 8px;
       font-size: 12px; color: #1f2937; }
@@ -494,6 +504,7 @@
         <h3>🤖 AI Assistant</h3>
         <span class="ai-meta" id="ai-meta">no pending changes</span>
       </div>
+      <button class="ai-help-btn" onclick="aiShowCapabilities()" title="What can the AI do?" aria-label="Show capabilities">ⓘ</button>
       <button class="ai-x" onclick="aiTogglePanel()" aria-label="Close">×</button>
     </div>
     <div class="ai-log" id="ai-log">
@@ -504,7 +515,8 @@
 • "Add grid connection application to Glossodia, due next Friday"
 • "Assign commissioning on Glossodia to Sarah"
 
-Changes are staged on a draft. Approve to commit, Discard to drop.</div>
+Changes are staged on a draft. Approve to commit, Discard to drop.
+Click ⓘ in the header for the full list of things I can do.</div>
     </div>
     <div class="ai-preview" id="ai-preview"></div>
     <div class="ai-actions" id="ai-actions" style="display:none;">
@@ -6108,6 +6120,67 @@ Phase                                Dur (d)   Predecessor
     return { confident: aiIsConfident(hits) ? hits[0].item : null, candidates: top5 };
   }
 
+  // Profiles cache for owner fuzzy-matching. Populated lazily — neither
+  // `_usersCache` (admin Manage Users) nor `_shareAllUsers` (share modal)
+  // is guaranteed to be loaded before an AI prompt runs. We prefetch at
+  // panel-open time and again on submit so the cache is warm by the time
+  // an applier needs it.
+  let _aiProfilesCache = [];
+  let _aiProfilesCacheLoaded = false;
+  async function aiEnsureProfilesCache() {
+    if (_aiProfilesCacheLoaded) return _aiProfilesCache;
+    if (!window.Supa || typeof window.Supa.listAllProfiles !== 'function') {
+      _aiProfilesCacheLoaded = true;
+      return _aiProfilesCache;
+    }
+    try {
+      const list = await window.Supa.listAllProfiles();
+      _aiProfilesCache = Array.isArray(list) ? list : [];
+    } catch (e) {
+      console.warn('[AI] listAllProfiles failed', e);
+      _aiProfilesCache = [];
+    }
+    _aiProfilesCacheLoaded = true;
+    return _aiProfilesCache;
+  }
+
+  // Match an owner string against the cached profile list. Returns
+  //   { confident: <profile|null>, candidates: profile[] }
+  // where each profile is { user_id, email, role, displayName }. The
+  // matcher is intentionally lenient — typing "jack" should match
+  // "jack.zhou@…" without prompting if there's only one such profile.
+  // If multiple "jack" profiles exist, both come back as candidates and
+  // the caller renders an owner-clarification UI.
+  function aiMatchOwner(query) {
+    if (!query || query === 'N/A') return { confident: null, candidates: [] };
+    const pool = _aiProfilesCache
+      .filter(p => p && p.email)
+      .map(p => ({
+        user_id: p.user_id,
+        email: p.email,
+        role: p.role,
+        displayName: String(p.email).split('@')[0],
+      }));
+    if (!pool.length) return { confident: null, candidates: [] };
+    // Exact local-part match shortcut — if "jack" === a profile's
+    // displayName, take it without consulting Fuse.
+    const exact = pool.find(p => p.displayName.toLowerCase() === query.toLowerCase());
+    if (exact) return { confident: exact, candidates: [exact] };
+    const fuse = aiFuse(pool, ['displayName', 'email']);
+    let hits = [];
+    if (fuse) {
+      hits = fuse.search(query);
+    } else {
+      const q = query.toLowerCase();
+      hits = pool
+        .filter(p => p.displayName.toLowerCase().includes(q) || p.email.toLowerCase().includes(q))
+        .map(p => ({ item: p, score: 0 }));
+    }
+    if (!hits.length) return { confident: null, candidates: [] };
+    const top5 = hits.slice(0, 5).map(h => h.item);
+    return { confident: aiIsConfident(hits) ? hits[0].item : null, candidates: top5 };
+  }
+
   // Resolve an operation target. Returns one of:
   //   { ok: true,  id, candidates }
   //   { ok: false, kind: 'project'|'item'|'none', candidates, reason }
@@ -6401,12 +6474,45 @@ Phase                                Dur (d)   Predecessor
     if (!res.ok) return { ok: false, reason: res.reason, candidates: res.candidates };
     const owner = (op.parameters.owner || '').trim();
     if (!owner || owner === 'N/A') return { ok: false, reason: 'No owner specified.' };
+    // Owner clarification — fuzzy-match against the profiles list unless
+    // the user already disambiguated via aiOnOwnerPick / aiOnOwnerUseAsNew.
+    if (!op.parameters._ownerResolved) {
+      const om = aiMatchOwner(owner);
+      if (om.confident) {
+        op.parameters.owner = om.confident.displayName;
+      } else if (om.candidates.length) {
+        return {
+          ok: false, kind: 'owner', candidates: om.candidates,
+          queriedName: owner,
+          reason: `Multiple users match "${owner}". Pick one or use as new.`,
+        };
+      }
+      // No hits → fall through with the freeform string (today's behaviour).
+    }
+    const finalOwner = (op.parameters.owner || '').trim();
     const node = draft.find(n => n.id === res.id);
-    node.owner = owner;
-    return { ok: true, targetId: res.id, owner };
+    node.owner = finalOwner;
+    return { ok: true, targetId: res.id, owner: finalOwner };
   }
 
   function aiApplyCreate(op, draft) {
+    // Owner clarification gate — same as aiApplyOwner. If the LLM included
+    // an owner string, match it against the profiles list before stamping
+    // it on the new row. Skipped when _ownerResolved is set by the picker.
+    const ownerRaw = (op.parameters.owner || '').trim();
+    if (ownerRaw && ownerRaw !== 'N/A' && !op.parameters._ownerResolved) {
+      const om = aiMatchOwner(ownerRaw);
+      if (om.confident) {
+        op.parameters.owner = om.confident.displayName;
+      } else if (om.candidates.length) {
+        return {
+          ok: false, kind: 'owner', candidates: om.candidates,
+          queriedName: ownerRaw,
+          reason: `Multiple users match "${ownerRaw}". Pick one or use as new.`,
+        };
+      }
+    }
+
     // ── item_type === 'project' → new top-level project, no parent needed ──
     if (op.target.item_type === 'project') {
       const newId = aiWithDraftScope(draft, () => nextId(null));
@@ -6987,6 +7093,10 @@ Phase                                Dur (d)   Predecessor
   // through the same clarification/commit machinery as a single prompt; the
   // queue waits for each commit (or cancellation) before pulling the next op.
   async function aiSubmitChange(messageText) {
+    // Fire the profiles fetch alongside the LLM call so the owner matcher
+    // has a populated cache by the time appliers run. The fetch is
+    // idempotent + lazy (aiEnsureProfilesCache memoises after first call).
+    const profilesPromise = aiEnsureProfilesCache();
     let resp;
     try {
       resp = await window.Supa.invokeChat(AI.chatHistory.slice(), AI.defaultModel);
@@ -6994,6 +7104,7 @@ Phase                                Dur (d)   Predecessor
       aiAppendMessage('assistant', '✗ ' + (e.message || String(e)));
       return;
     }
+    await profilesPromise;
     // Normalise to an array regardless of whether the LLM returned an envelope
     // or a single bare op (the edge fn already wraps, but be defensive).
     let ops = [];
@@ -7285,7 +7396,11 @@ Phase                                Dur (d)   Predecessor
     if (!result.ok) {
       let msg = '✗ ' + (result.reason || 'Could not apply');
       if (result.candidates && result.candidates.length && result.kind) {
-        aiAskClarification(op, result.candidates, result.kind, result.reason, messageText);
+        if (result.kind === 'owner') {
+          aiAskOwnerChoice(op, result.candidates, result.queriedName, result.reason, messageText);
+        } else {
+          aiAskClarification(op, result.candidates, result.kind, result.reason, messageText);
+        }
         if (AI.pendingChanges.length === 0) {
           AI.draft = null; AI.baseSnapshot = null;
         }
@@ -7368,6 +7483,57 @@ Phase                                Dur (d)   Predecessor
     wrap.innerHTML = html;
     log.appendChild(wrap);
     log.scrollTop = log.scrollHeight;
+  }
+
+  // Owner-specific clarification — same visual treatment as
+  // aiAskClarification but candidates are profile records, and we offer an
+  // extra "Use … as new" override for cases where the user really meant
+  // to add a freeform owner that doesn't match the team list.
+  function aiAskOwnerChoice(op, candidates, queriedName, reason, messageText) {
+    const stashId = aiNewClarifyId();
+    AI.clarifications[stashId] = {
+      operation: op, sourceText: messageText, candidates, kind: 'owner', queriedName,
+    };
+    const log = document.getElementById('ai-log');
+    if (!log) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'ai-msg ai-msg-assistant ai-clarify';
+    wrap.dataset.stash = stashId;
+    let html = `<div>${aiEscapeHtml(reason || 'Did you mean…')}</div><div class="ai-cand-row">`;
+    for (const c of candidates) {
+      const sub = `<span class="ai-cand-id">${aiEscapeHtml(c.email || '')}</span>`;
+      html += `<button class="ai-cand-btn" onclick="aiOnOwnerPick('${stashId}','${aiEscapeAttr(c.displayName)}')">${aiEscapeHtml(c.displayName)} ${sub}</button>`;
+    }
+    html += `<button class="ai-cand-btn" onclick="aiOnOwnerUseAsNew('${stashId}')">Use "${aiEscapeHtml(queriedName)}" as new <span class="ai-cand-id">freeform — no profile link</span></button>`;
+    html += `<button class="ai-cand-btn ai-cand-cancel" onclick="aiOnCandidateCancel('${stashId}')">Cancel</button>`;
+    html += `</div>`;
+    wrap.innerHTML = html;
+    log.appendChild(wrap);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function aiOnOwnerPick(stashId, displayName) {
+    const stash = AI.clarifications[stashId];
+    if (!stash) return;
+    const op = stash.operation;
+    op.parameters.owner = displayName;
+    op.parameters._ownerResolved = true;
+    document.querySelector(`.ai-clarify[data-stash="${stashId}"]`)?.remove();
+    delete AI.clarifications[stashId];
+    aiAppendMessage('user', `→ owner ${displayName}`);
+    aiDispatchOp(op, stash.sourceText);
+  }
+
+  function aiOnOwnerUseAsNew(stashId) {
+    const stash = AI.clarifications[stashId];
+    if (!stash) return;
+    const op = stash.operation;
+    // Keep op.parameters.owner as the original string the user typed.
+    op.parameters._ownerResolved = true;
+    document.querySelector(`.ai-clarify[data-stash="${stashId}"]`)?.remove();
+    delete AI.clarifications[stashId];
+    aiAppendMessage('user', `→ owner "${stash.queriedName}" (as new)`);
+    aiDispatchOp(op, stash.sourceText);
   }
 
   function aiOnCandidatePick(stashId, chosenId) {
@@ -7924,6 +8090,53 @@ Phase                                Dur (d)   Predecessor
   }
 
   // ---- chat UI plumbing ----
+  // Append a chat row whose body is a pre-built HTML string. Used ONLY for
+  // capabilities — every other path uses aiAppendMessage with textContent
+  // so user / LLM strings can't smuggle HTML into the chat log.
+  function aiAppendHtmlMessage(role, html, extraClass) {
+    const log = document.getElementById('ai-log');
+    if (!log) return;
+    const el = document.createElement('div');
+    el.className = 'ai-msg ai-msg-' + role + (extraClass ? ' ' + extraClass : '');
+    el.innerHTML = html;
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  // Render the "what can the AI do?" panel into the chat log. Triggered by
+  // the ⓘ button in the panel header. Categorised so users can scan;
+  // examples are pulled from the same utterances used in the LLM examples.
+  function aiShowCapabilities() {
+    const html = `
+      <h4>✏ Edit a task</h4>
+      <ul>
+        <li><b>Move dates</b> — <em>"BESS for Glossodia is delayed by 2 weeks"</em></li>
+        <li><b>Rename</b> — <em>"Rename BESS delivery to BESS install"</em></li>
+        <li><b>Change duration / budget</b> — <em>"Change grid connection in Glossodia to 10 days"</em></li>
+        <li><b>Mark progress</b> — <em>"DA approval for Glossodia is now complete"</em> or <em>"BESS procurement is 40% done"</em></li>
+        <li><b>Assign owner</b> — <em>"Assign commissioning on Glossodia to Sarah"</em></li>
+        <li><b>Delete</b> — <em>"Delete the inverter installation task in Riverstone"</em></li>
+      </ul>
+      <h4>🧱 Restructure</h4>
+      <ul>
+        <li><b>Add task / subtask / project</b> — <em>"Add grid connection to Glossodia, due next Friday"</em></li>
+        <li><b>Set dependency</b> — <em>"Make commissioning depend on BESS delivery"</em></li>
+        <li><b>Fit a new project in</b> — <em>"New 500kW solar at Penrith starting in July — can we fit it?"</em></li>
+      </ul>
+      <h4>🔍 Ask (no changes)</h4>
+      <ul>
+        <li><b>Progress / dates / slack</b> — <em>"What's the progress of BESS delivery?"</em>, <em>"When does inverter installation finish?"</em>, <em>"Who owns commissioning?"</em></li>
+      </ul>
+      <h4>📚 Tips</h4>
+      <ul>
+        <li>You can stack multiple commands in one message — each is shown as a checkbox so you can untick any I misread.</li>
+        <li>Changes stage to a draft. <b>Approve all</b> to save, <b>Discard</b> to drop, or keep going to add more.</li>
+        <li>If I'm unsure which project, task, or person you mean, I'll show you candidates to pick from.</li>
+      </ul>
+    `.trim();
+    aiAppendHtmlMessage('assistant', html, 'ai-caps');
+  }
+
   function aiAppendMessage(role, text) {
     const log = document.getElementById('ai-log');
     if (!log) return;
@@ -7971,6 +8184,9 @@ Phase                                Dur (d)   Predecessor
     p.classList.toggle('open');
     if (p.classList.contains('open')) {
       setTimeout(() => document.getElementById('ai-input')?.focus(), 50);
+      // Warm the profiles cache so the first owner-related prompt doesn't
+      // pay the round-trip inside aiSubmitChange.
+      aiEnsureProfilesCache().catch(() => {});
     }
   }
 
@@ -7989,6 +8205,9 @@ Phase                                Dur (d)   Predecessor
   window.aiOnWindowPick      = aiOnWindowPick;
   window.aiOnBatchApply      = aiOnBatchApply;
   window.aiOnBatchCancel     = aiOnBatchCancel;
+  window.aiOnOwnerPick       = aiOnOwnerPick;
+  window.aiOnOwnerUseAsNew   = aiOnOwnerUseAsNew;
+  window.aiShowCapabilities  = aiShowCapabilities;
   // Hook called by the supabase realtime callbacks after they merge a remote
   // edit into NODES, so the AI panel can rebuild its draft on top.
   window.__aiOnRemoteSync    = aiOnRemoteSync;

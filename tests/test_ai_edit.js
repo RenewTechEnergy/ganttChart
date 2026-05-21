@@ -253,6 +253,38 @@ function aiMatchItem(query, nodes, projectNode, itemType) {
   return { id: null, candidates: top5 };
 }
 
+// Profiles stub — tests populate `_aiProfilesCache` directly via
+// setProfilesForTests() in the relevant scenario. Production loads it
+// lazily from Supa.listAllProfiles(); the matcher logic is identical.
+let _aiProfilesCache = [];
+function setProfilesForTests(list) { _aiProfilesCache = Array.isArray(list) ? list : []; }
+
+// index.html:6090 (test port) — fuzzy-match an owner string against the
+// cached profile list. Returns { confident, candidates } where each entry
+// has { user_id, email, role, displayName }.
+function aiMatchOwner(query) {
+  if (!query || query === 'N/A') return { confident: null, candidates: [] };
+  const pool = _aiProfilesCache
+    .filter(p => p && p.email)
+    .map(p => ({
+      user_id: p.user_id, email: p.email, role: p.role,
+      displayName: String(p.email).split('@')[0],
+    }));
+  if (!pool.length) return { confident: null, candidates: [] };
+  const exact = pool.find(p => p.displayName.toLowerCase() === query.toLowerCase());
+  if (exact) return { confident: exact, candidates: [exact] };
+  const q = query.toLowerCase();
+  const hits = pool
+    .filter(p => p.displayName.toLowerCase().includes(q) || p.email.toLowerCase().includes(q))
+    .map(p => ({ item: p, score: 0 }));
+  if (!hits.length) return { confident: null, candidates: [] };
+  const top5 = hits.slice(0, 5).map(h => h.item);
+  // Mirror aiIsConfident: substring-only matcher (no Fuse) has score=0
+  // for every hit, so confidence == singleton hit. Anything ambiguous
+  // falls through to the candidates path.
+  return { confident: hits.length === 1 ? hits[0].item : null, candidates: top5 };
+}
+
 // index.html:5833
 function aiResolveTarget(target, nodes) {
   const project = aiMatchProject(target.project, nodes);
@@ -377,9 +409,22 @@ function aiApplyOwner(op, draft) {
   if (!res.ok) return { ok: false, reason: res.reason, candidates: res.candidates };
   const owner = (op.parameters.owner || '').trim();
   if (!owner || owner === 'N/A') return { ok: false, reason: 'No owner specified.' };
+  if (!op.parameters._ownerResolved) {
+    const om = aiMatchOwner(owner);
+    if (om.confident) {
+      op.parameters.owner = om.confident.displayName;
+    } else if (om.candidates.length) {
+      return {
+        ok: false, kind: 'owner', candidates: om.candidates,
+        queriedName: owner,
+        reason: `Multiple users match "${owner}". Pick one or use as new.`,
+      };
+    }
+  }
+  const finalOwner = (op.parameters.owner || '').trim();
   const node = draft.find(n => n.id === res.id);
-  node.owner = owner;
-  return { ok: true, targetId: res.id, owner };
+  node.owner = finalOwner;
+  return { ok: true, targetId: res.id, owner: finalOwner };
 }
 
 // index.html:5987
@@ -849,6 +894,7 @@ function reset() {
   AI.draft = null;
   AI.baseSnapshot = null;
   AI.pendingChanges = [];
+  _aiProfilesCache = [];
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -1252,6 +1298,61 @@ describe('E · §2.6 — "Assign BESS procurement to Jack"', () => {
     eq(NODES.find(n => n.id === 'P1-T2').owner, 'Jack');
   });
 });
+
+describe('E · owner clarification — single profile match substitutes the local-part', () => {
+  it('"Jack" matches "jack.zhou@…" → owner is set to "jack.zhou" without prompting', () => {
+    seedGlossodiaViaPrompts();
+    setProfilesForTests([{ user_id: 'u1', email: 'jack.zhou@team.local', role: 'user' }]);
+    const r = prompt(assignOwner('Glossodia', 'BESS', 'Jack'), 'Assign BESS to Jack');
+    eq(r.ok, true, 'apply succeeded');
+    approve();
+    eq(NODES.find(n => n.id === 'P1-T2').owner, 'jack.zhou',
+       'owner substituted to the matched profile local-part');
+  });
+});
+
+describe('E · owner clarification — ambiguous query returns candidates, real NODES untouched', () => {
+  it('two "jack-*" profiles → kind:"owner" + candidates, NODES owner field unchanged', () => {
+    seedGlossodiaViaPrompts();
+    setProfilesForTests([
+      { user_id: 'u1', email: 'jack.zhou@team.local', role: 'user' },
+      { user_id: 'u2', email: 'jack.wong@team.local', role: 'user' },
+    ]);
+    const before = NODES.find(n => n.id === 'P1-T2').owner;
+    const r = prompt(assignOwner('Glossodia', 'BESS', 'jack'), 'Assign BESS to jack');
+    eq(r.ok, false, 'rejected pending clarification');
+    eq(r.kind, 'owner', 'kind tagged so commit branches to owner picker');
+    ok(r.candidates && r.candidates.length === 2, 'both profiles surfaced as candidates');
+    eq(r.queriedName, 'jack', 'original query preserved for "use as new" button');
+    // First-op rejection clears the draft via aiSubmitChangeSync — the
+    // important guarantee is that real NODES are not mutated. (Production
+    // keeps the draft alive because the clarification UI re-dispatches.)
+    eq(NODES.find(n => n.id === 'P1-T2').owner, before,
+       'real NODES owner unchanged when clarification is pending');
+  });
+});
+
+describe('E · owner clarification — no profile match falls through (today\'s behaviour)', () => {
+  it('"Jack" with no jack-* profile → freeform string is set, no prompt', () => {
+    seedGlossodiaViaPrompts();
+    setProfilesForTests([{ user_id: 'u1', email: 'sarah.kim@team.local', role: 'user' }]);
+    const r = prompt(assignOwner('Glossodia', 'BESS', 'Jack'),
+      'Assign BESS to Jack (no matching profile)');
+    eq(r.ok, true, 'falls through with freeform owner');
+    approve();
+    eq(NODES.find(n => n.id === 'P1-T2').owner, 'Jack',
+       'freeform owner string preserved when no profile candidates exist');
+  });
+});
+
+// Predecessor clarification regression — the production aiMatchItem uses
+// Fuse with a confidence gap, so an ambiguous predecessor name produces
+// candidates and routes through aiAskClarification. The test harness
+// substitutes substring matching with a different confidence heuristic
+// (zero-score hits always win), so the candidates path can't be
+// exercised here faithfully. The production behaviour is verified by
+// inspection of aiApplyAddDependency at index.html:6557 + the existing
+// "H · §2.7 — add_dependency" test that lands a confident predecessor.
 
 /* ═════════════════════════════════════════════════════════════════════════
  * F · DRAFT LIFECYCLE — §4 deterministic workflow + §5 draft system
