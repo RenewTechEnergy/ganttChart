@@ -10,7 +10,8 @@ import {
   fallbackExtraction,
   parseCompletion,
 } from "./schema.ts";
-import { systemMessage } from "./system-message.ts";
+import { openrouterProvider } from "./providers/openrouter.ts";
+import { MissingApiKeyError } from "./providers/types.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -69,7 +70,7 @@ export default {
       // Cap at the last 12 messages to keep token usage bounded — the client
       // also caps at this, but defending here too.
       const HISTORY_CAP = 12;
-      let convo: Array<{ role: string; content: string }> = [];
+      let convo: Array<{ role: "user" | "assistant"; content: string }> = [];
       if (Array.isArray(body.messages)) {
         for (const m of body.messages) {
           if (!m || typeof m !== "object") continue;
@@ -96,76 +97,42 @@ export default {
         });
       }
 
-      const apiKey = Deno.env.get("OPENROUTER_API_KEY");
-
-      if (!apiKey) {
-        return new Response(
-          JSON.stringify({ error: "Missing OPENROUTER_API_KEY" }),
-          {
-            status: 500,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          },
-        );
-      }
-
       // Optional board context — the client sends a compact summary of the
       // projects currently in scope so the LLM can resolve hierarchy
       // ("under handover & documentation") and pick the right item_type /
       // parent without guessing. Capped at 8000 chars to bound tokens.
       const boardContextRaw = typeof body.boardContext === "string" ? body.boardContext : "";
       const boardContext = boardContextRaw.slice(0, 8000).trim();
-      const contextMessages = boardContext
-        ? [{
-            role: "system",
-            content:
-              "Current board state (use the IDs verbatim in `target.parent` or `parameters.predecessor` when the user names something already on the board). Items not listed here do not exist yet — for those, use create_item.\n\n" +
-              boardContext,
-          }]
-        : [];
 
-      const openrouterModel = ({ haiku: "anthropic/claude-haiku-4-5", sonnet: "anthropic/claude-sonnet-4-5", opus: "anthropic/claude-opus-4-1" } as const)[requestedModel];
+      let result;
+      try {
+        result = await openrouterProvider.chat({
+          model: requestedModel,
+          conversation: convo,
+          boardContext,
+        });
+      } catch (err) {
+        if (err instanceof MissingApiKeyError) {
+          return new Response(
+            JSON.stringify({ error: err.message }),
+            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+        throw err;
+      }
 
-      const upstream = await fetch(
-        "https://openrouter.ai/api/v1/chat/completions",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-            "HTTP-Referer": "http://localhost:3000",
-            "X-Title": "Project Gantt Action Extractor",
-          },
-          body: JSON.stringify({
-            model: openrouterModel,
-            messages: [systemMessage, ...contextMessages, ...convo],
-            temperature: 0,
-            // 4000 is plenty for a multi-op batch (each op ≈ 700 chars ≈ 180
-            // tokens, so up to ~20 ops). Single-op responses stop well early.
-            max_tokens: 4000,
-          }),
-        },
-      );
-
-      if (!upstream.ok) {
-        const errorText = await upstream.text();
-
+      if (!result.ok) {
         return new Response(
           JSON.stringify({
-            error: "OpenRouter request failed",
-            status: upstream.status,
-            details: errorText,
+            error: `${openrouterProvider.name} request failed`,
+            status: result.status,
+            details: result.error,
           }),
-          {
-            status: upstream.status,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          },
+          { status: result.status, headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }
 
-      const raw = await upstream.json();
-      const content = raw?.choices?.[0]?.message?.content ?? "";
-
-      const ops = parseCompletion(content);
+      const ops = parseCompletion(result.text);
       return Response.json({ operations: ops }, { headers: corsHeaders });
     },
   ),
