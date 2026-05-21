@@ -13,6 +13,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Project Gantt</title>
+  <!-- Fuse.js for fuzzy matching project/task names in the AI assistant -->
+  <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js"></script>
   <style>
     :root { color-scheme: light; }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -199,6 +201,152 @@
     body.readonly .btn-reset,
     body.readonly .btn-save { pointer-events: none; opacity: 0.4; }
     body.readonly .bar { cursor: default !important; }
+
+    /* ── AI editing panel ── */
+    #aiToggleBtn {
+      position: fixed; right: 16px; bottom: 16px; z-index: 9000;
+      background: #7c3aed; color: white; padding: 9px 16px; font-size: 13px; font-weight: 700;
+      border: none; border-radius: 999px; cursor: pointer;
+      box-shadow: 0 4px 14px rgba(124,58,237,.35);
+    }
+    #aiToggleBtn:hover { background: #6d28d9; }
+    body.signed-out #aiToggleBtn,
+    body.signed-out #ai-panel { display: none !important; }
+    #ai-panel {
+      position: fixed; right: -460px; top: 56px; bottom: 0; width: 440px;
+      background: white; border-left: 1px solid #e5e7eb; z-index: 9100;
+      display: flex; flex-direction: column;
+      box-shadow: -4px 0 16px rgba(0,0,0,.08);
+      transition: right .2s ease-out;
+    }
+    #ai-panel.open { right: 0; }
+    .ai-head { display: flex; align-items: center; justify-content: space-between;
+      padding: 11px 14px; border-bottom: 1px solid #e5e7eb; background: #faf5ff; }
+    .ai-head h3 { font-size: 13px; font-weight: 700; color: #5b21b6; margin: 0; }
+    .ai-head .ai-meta { font-size: 10px; color: #9ca3af; margin-left: 8px; }
+    .ai-x { background: transparent; border: none; font-size: 22px; line-height: 1;
+      cursor: pointer; color: #9ca3af; padding: 0 4px; }
+    .ai-x:hover { color: #111827; }
+    .ai-help-btn { background: transparent; border: none; font-size: 18px;
+      line-height: 1; cursor: pointer; color: #9ca3af; padding: 0 6px; }
+    .ai-help-btn:hover { color: #5b21b6; }
+    .ai-caps { background: #f5f3ff; border: 1px solid #ddd6fe;
+      align-self: stretch; color: #1f2937; font-size: 11px; line-height: 1.55; }
+    .ai-caps h4 { font-size: 12px; font-weight: 700; color: #5b21b6;
+      margin: 6px 0 4px; }
+    .ai-caps ul { margin: 0 0 6px; padding-left: 18px; }
+    .ai-caps li { margin: 2px 0; }
+    .ai-caps li em { color: #6b7280; font-style: normal; }
+    .ai-batch-edit { align-self: stretch; background: #fafafa;
+      border: 1px solid #e5e7eb; color: #1f2937; font-size: 11px;
+      line-height: 1.45; padding: 8px 10px; }
+    .ai-batch-edit-head { font-weight: 700; color: #374151;
+      margin-bottom: 6px; font-size: 11px; }
+    .ai-batch-card { background: white; border: 1px solid #e5e7eb;
+      border-radius: 6px; padding: 8px 10px; margin: 6px 0; }
+    .ai-batch-card.skipped { opacity: 0.5; background: #fef2f2; }
+    .ai-batch-card-head { display: flex; align-items: center;
+      gap: 6px; margin-bottom: 6px; }
+    .ai-batch-card-num { font-weight: 700; color: #6b7280;
+      font-size: 10px; min-width: 14px; }
+    .ai-batch-card .ai-batch-row { display: grid;
+      grid-template-columns: 84px 1fr; gap: 6px 8px; align-items: center;
+      margin-bottom: 4px; }
+    .ai-batch-card label { color: #6b7280; font-size: 10px;
+      text-transform: uppercase; letter-spacing: 0.4px; }
+    .ai-batch-card select, .ai-batch-card input[type="text"],
+    .ai-batch-card input[type="number"] {
+      width: 100%; font-size: 11px; padding: 3px 6px;
+      border: 1px solid #d1d5db; border-radius: 4px;
+      background: white; color: #1f2937; }
+    .ai-batch-card select:focus, .ai-batch-card input:focus {
+      outline: 2px solid #7c3aed; border-color: transparent; }
+    .ai-batch-skip { font-size: 10px; color: #6b7280; cursor: pointer;
+      margin-left: auto; display: inline-flex; align-items: center;
+      gap: 4px; user-select: none; }
+    .ai-batch-skip input { margin: 0; }
+    .ai-log { flex: 1; padding: 12px 14px; overflow-y: auto;
+      display: flex; flex-direction: column; gap: 8px;
+      font-size: 12px; color: #1f2937; }
+    .ai-msg { padding: 7px 10px; border-radius: 8px; max-width: 92%;
+      white-space: pre-wrap; word-break: break-word; line-height: 1.45; }
+    .ai-msg-user { background: #ecfdf5; border: 1px solid #d1fae5;
+      align-self: flex-end; color: #065f46; }
+    .ai-msg-assistant { background: #f3f4f6; border: 1px solid #e5e7eb;
+      align-self: flex-start; }
+    .ai-msg-system { background: #fef3c7; border: 1px solid #fde68a;
+      font-size: 11px; color: #78350f; }
+    .ai-preview { padding: 0 14px 8px; font-size: 11px;
+      max-height: 32vh; overflow-y: auto;
+      border-top: 1px dashed #e5e7eb; }
+    .ai-preview:empty { display: none; }
+    .ai-preview-head { font-size: 11px; font-weight: 700; color: #374151;
+      padding: 8px 0; }
+    .ai-preview-section { font-size: 10px; text-transform: uppercase;
+      color: #6b7280; margin-top: 8px; letter-spacing: .5px; font-weight: 700; }
+    .ai-preview-row { padding: 6px 8px; background: #f9fafb;
+      border: 1px solid #f3f4f6; border-radius: 6px; margin-top: 4px;
+      line-height: 1.5; word-break: break-word; }
+    .ai-preview-row code { font-family: ui-monospace, Menlo, monospace;
+      font-size: 10px; background: #e0e7ff; color: #3730a3;
+      padding: 1px 5px; border-radius: 3px; }
+    .ai-old { color: #b91c1c; text-decoration: line-through; }
+    .ai-new { color: #047857; font-weight: 600; }
+    .ai-muted { color: #9ca3af; font-style: italic; }
+    .ai-actions { display: flex; gap: 6px; padding: 8px 14px;
+      border-top: 1px solid #e5e7eb; justify-content: flex-end;
+      background: #fafafa; }
+    .ai-actions .btn { font-size: 11px; padding: 5px 10px; }
+    .ai-actions .ghost { background: white; color: #374151;
+      border: 1px solid #d1d5db; }
+    .ai-actions .ghost:hover { background: #f3f4f6; }
+    .ai-input-bar { display: flex; gap: 6px; padding: 10px 14px;
+      border-top: 1px solid #e5e7eb; align-items: flex-end; }
+    .ai-input-bar textarea { flex: 1; font-size: 12px; padding: 6px 8px;
+      border: 1px solid #d1d5db; border-radius: 6px;
+      resize: none; font-family: inherit; line-height: 1.4; }
+    .ai-input-bar textarea:focus { outline: 2px solid #7c3aed; border-color: transparent; }
+    .ai-input-bar select { font-size: 11px; padding: 4px 6px; }
+    .ai-input-bar .btn { padding: 6px 12px; font-size: 12px; }
+    body.readonly #aiToggleBtn { display: none !important; }
+    /* Clarification candidate buttons (rendered inside an assistant message) */
+    .ai-clarify .ai-cand-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .ai-cand-btn { font-size: 11px; padding: 5px 9px; background: white;
+      color: #1f2937; border: 1px solid #c4b5fd; border-radius: 6px;
+      cursor: pointer; text-align: left; font-family: inherit;
+      transition: background .12s, border-color .12s; }
+    .ai-cand-btn:hover { background: #f5f3ff; border-color: #7c3aed; }
+    .ai-cand-btn .ai-cand-id { display: block; font-size: 9px;
+      color: #6b7280; font-family: ui-monospace, Menlo, monospace; margin-top: 2px; }
+    .ai-cand-btn.ai-cand-cancel { color: #6b7280; border-color: #d1d5db; }
+    .ai-cand-btn.ai-cand-cancel:hover { background: #f3f4f6; }
+    /* Preview warnings (conflicts / deadline slips) */
+    .ai-warning { font-size: 11px; padding: 5px 9px; border-radius: 5px;
+      margin-top: 4px; line-height: 1.4; word-break: break-word; }
+    .ai-warning.ai-warn-warn { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+    .ai-warning.ai-warn-info { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+    .ai-warn-count { color: #b45309; font-weight: 700; }
+    /* Batch confirm — checkbox list for multi-op prompts */
+    .ai-batch-list { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+    .ai-batch-item { display: flex; align-items: baseline; gap: 6px; font-size: 11px;
+      padding: 5px 8px; background: #f9fafb; border: 1px solid #f3f4f6;
+      border-radius: 5px; cursor: pointer; }
+    .ai-batch-item:hover { background: #f3f4f6; }
+    .ai-batch-item input { width: auto; margin: 0; }
+    .ai-batch-op { font-family: ui-monospace, Menlo, monospace; font-size: 10px;
+      background: #e0e7ff; color: #3730a3; padding: 1px 5px; border-radius: 3px; }
+    .ai-batch-target { flex: 1; color: #1f2937; }
+    .ai-batch-missing { font-size: 9px; color: #b45309; font-style: italic; }
+    /* View toggle (Actual / Scheduled) in the toolbar */
+    .view-toggle { display: inline-flex; border: 1px solid #d1d5db;
+      border-radius: 6px; overflow: hidden; }
+    .view-toggle .vt-btn { font-size: 11px; font-weight: 600;
+      padding: 5px 10px; border: none; background: white; color: #374151;
+      cursor: pointer; white-space: nowrap; transition: background .12s; }
+    .view-toggle .vt-btn:hover { background: #f3f4f6; }
+    .view-toggle .vt-btn + .vt-btn { border-left: 1px solid #e5e7eb; }
+    .view-toggle .vt-btn.active { background: #1a6b2e; color: white; }
+    .view-toggle .vt-btn.active:hover { background: #155725; }
   </style>
 </head>
 <body class="signed-out">
@@ -283,6 +431,10 @@
       <option value="id">ID</option>
     </select>
     <button class="btn btn-collapse" onclick="toggleCollapseAll()" id="collapseAllBtn">⊟ Collapse</button>
+    <span class="view-toggle" id="viewToggle" title="Switch which dates the gantt bars render against. Scheduled = the immutable baseline. Actual = live PM-edited dates (falls back to sched if not yet set).">
+      <button class="vt-btn"          data-mode="actual"    onclick="setViewMode('actual')">⚡ Actual</button>
+      <button class="vt-btn"          data-mode="scheduled" onclick="setViewMode('scheduled')">🗓 Scheduled</button>
+    </span>
     <button class="btn" id="todayBtn" style="background:#dc2626;color:white" onclick="focusToday()" title="Toggle focus on tasks currently in progress">🎯 Today's tasks</button>
     <label style="font-size:11px; color:#374151; display:flex; align-items:center; gap:4px; margin-left:6px;" title="Clamp displayed slack to at most this many days. Leave empty for no cap.">
       Max slack (d):
@@ -298,7 +450,7 @@
     <button class="btn btn-users" id="usersBtn" onclick="openManageUsersModal()" title="Assign admin / user / viewer roles" style="display:none; background:#7c3aed; color:white;">⚙ Users</button>
     <button class="btn btn-xlsx" onclick="exportCSV()" title="Download a CSV snapshot">📄 Export CSV</button>
     <button class="btn btn-reset" onclick="clearGantt()" title="Wipe every row from the chart (and from the cloud if signed in)">🗑 Clear</button>
-    <button class="btn" style="background:#7c3aed;color:white;" onclick="recalcAll()" title="Force CPM rebuild — snap tasks behind their predecessors and recompute critical path/slack">🔄 Recalc</button>
+    <button class="btn" style="background:#7c3aed;color:white;" onclick="recalcAll()" title="Optimise — ASAP compression: snap every task to its earliest possible start so the project finishes as soon as possible">🚀 Optimise</button>
     <button class="btn btn-add-p" onclick="openAdd('project')">+ Project</button>
     <button class="btn btn-add-t" onclick="openAdd('task')">+ Task</button>
     <button class="btn btn-add-s" onclick="openAdd('subtask')">+ Subtask</button>
@@ -369,6 +521,45 @@
       <div>• <b>Margin =</b> Sale Price − Cost-to-Date. Costs and % Done roll up from subtasks; sale price is set on the project row only.</div>
       <div>• <b>Row grouping:</b> use the ▾/▸ arrows next to project/task rows to collapse subtasks, or "⊟ Collapse" in the toolbar.</div>
       <div>• <b>Saving:</b> the CSV download is the session store — reload it next time by attaching the file and re-running the gantt-chart skill.</div>
+    </div>
+  </div>
+
+  <!-- AI editing panel — toggle button + slide-out from right edge -->
+  <button id="aiToggleBtn" onclick="aiTogglePanel()" title="Open AI assistant (natural-language project edits)">🤖 AI</button>
+  <div id="ai-panel" role="dialog" aria-label="AI assistant">
+    <div class="ai-head">
+      <div>
+        <h3>🤖 AI Assistant</h3>
+        <span class="ai-meta" id="ai-meta">no pending changes</span>
+      </div>
+      <button class="ai-help-btn" onclick="aiShowCapabilities()" title="What can the AI do?" aria-label="Show capabilities">ⓘ</button>
+      <button class="ai-x" onclick="aiTogglePanel()" aria-label="Close">×</button>
+    </div>
+    <div class="ai-log" id="ai-log">
+      <div class="ai-msg ai-msg-system">Describe a project change in plain English. Examples:
+• "BESS for Glossodia is delayed by 2 weeks"
+• "Move inverter installation for Riverstone one week earlier"
+• "DA approval for Glossodia is now complete"
+• "Add grid connection application to Glossodia, due next Friday"
+• "Assign commissioning on Glossodia to Sarah"
+
+Changes are staged on a draft. Approve to commit, Discard to drop.
+Click ⓘ in the header for the full list of things I can do.</div>
+    </div>
+    <div class="ai-preview" id="ai-preview"></div>
+    <div class="ai-actions" id="ai-actions" style="display:none;">
+      <button class="btn btn-cancel" onclick="aiDiscard()">Discard</button>
+      <button class="btn ghost" onclick="aiAddMore()">Add more</button>
+      <button class="btn btn-ok" onclick="aiApprove()">Approve all</button>
+    </div>
+    <div class="ai-input-bar">
+      <textarea id="ai-input" rows="2" placeholder="Type a project edit…" onkeydown="aiOnKeydown(event)"></textarea>
+      <select id="ai-model" title="Which model to use">
+        <option value="haiku" selected>Haiku</option>
+        <option value="sonnet">Sonnet</option>
+        <option value="opus">Opus</option>
+      </select>
+      <button id="ai-send" class="btn btn-ok" onclick="aiOnSend()">Send</button>
     </div>
   </div>
 
@@ -585,8 +776,26 @@
   <script type="module">
     import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-    const SUPABASE_URL              = "https://gdliekkwgsffeufraphk.supabase.co";
-    const SUPABASE_PUBLISHABLE_KEY  = "sb_publishable_Nkpe931Zpj0Ghhm2x3WCmQ_7U_8UxvD";
+    // Centralised Supabase + edge-function config. All HTTP calls in this
+    // module read from here; do NOT introduce ad-hoc URLs elsewhere.
+    //
+    // To develop against local supabase: set useLocalEdge to true AND make sure
+    // `supabase start` + `supabase functions serve chat` are running. The
+    // local publishable key comes from `supabase status` and changes when
+    // the local stack is reset.
+    //
+    // To run against cloud: leave useLocalEdge as false. Cloud uses the
+    // publishable key + project URL.
+    const SUPA_CONFIG = {
+      supabaseUrl:         "https://gdliekkwgsffeufraphk.supabase.co",
+      publishableKey:      "sb_publishable_Nkpe931Zpj0Ghhm2x3WCmQ_7U_8UxvD",
+      localFunctionsBase:  "http://127.0.0.1:54321",
+      localPublishableKey: "sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH",
+      useLocalEdge:        false,
+    };
+
+    const SUPABASE_URL             = SUPA_CONFIG.supabaseUrl;
+    const SUPABASE_PUBLISHABLE_KEY = SUPA_CONFIG.publishableKey;
 
     // Wrap fetch so every Supabase HTTP call is visible in the console with
     // method, path, status, duration, and the tab/network state at request time.
@@ -949,6 +1158,16 @@
       return JSON.stringify(normalizeForDiff(a)) !== JSON.stringify(normalizeForDiff(b));
     }
 
+    // Local copy of scripts/scheduler.js's parsePredecessor — inlined here so
+    // the cloud save doesn't depend on the ES module having loaded yet. Same
+    // semantics: "P1-T1-S1" → FS+0, "P1-T1-S1FS+2" → FS+2, "TFF-3" → FF-3.
+    const PRED_RE = /^([\w.\-]+)(FS|SS|FF)?([+-]\d+)?$/;
+    function parsePredecessorLocal(s) {
+      const m = PRED_RE.exec(String(s).trim());
+      if (!m) throw new Error(`Cannot parse predecessor: ${JSON.stringify(s)}`);
+      return { predId: m[1], type: m[2] || "FS", lag: m[3] ? parseInt(m[3], 10) : 0 };
+    }
+
     // Normalize a node's predecessors string to a sorted, deduped id list so we
     // can detect "predecessors actually changed" cheaply.
     function predSignature(predStr) {
@@ -994,6 +1213,15 @@
     //     and warn; the user's local edit stays in NODES so the next save retries.
     async function upsertAll(nodes) {
       console.log("[Supa] sync firing for", nodes.length, "nodes");
+
+      // Regression guard for the "preds silently never sync" bug: if (b) is 0
+      // every time you save preds, the bug is upstream of upsertAll (NODES
+      // doesn't carry the edit, or serverPreds got wrongly pre-populated).
+      // Logged at debug level so it only shows when "Verbose" is enabled in
+      // the DevTools console log-level filter.
+      const localHasPreds  = nodes.filter(n => n.predecessors && String(n.predecessors).trim()).length;
+      const wouldBeChanged = nodes.filter(n => predSignature(n.predecessors) !== (serverPreds.get(n.id) || "")).length;
+      console.debug(`[Supa] upsertAll entry: ${nodes.length} nodes, ${localHasPreds} with non-empty preds, ${wouldBeChanged} would be predsChanged. serverPreds size=${serverPreds.size}`);
 
       // Dedupe ids defensively (NODES should already be unique, but if not, last wins).
       const byId = new Map();
@@ -1067,6 +1295,18 @@
       // ─── Predecessor sync ───
       // For each task whose predecessor signature changed since the server saw
       // it, delete its predecessor rows and reinsert the current set.
+
+      // Regression guard companion: dump one example node carrying preds so
+      // you can see whether local NODES actually has the user's edit at sync
+      // time, and what serverPreds thinks the server has. Debug-level — only
+      // shows under DevTools "Verbose" log filter.
+      const sampleWithPreds = nodes.find(n => n.predecessors && String(n.predecessors).trim());
+      if (sampleWithPreds) {
+        console.debug(`[Supa] preds.diff sample id=${sampleWithPreds.id} local="${sampleWithPreds.predecessors}" server="${serverPreds.get(sampleWithPreds.id) || ""}"`);
+      } else {
+        console.debug(`[Supa] preds.diff sample: no node carries a non-empty predecessors string at sync time`);
+      }
+
       const predsChanged = [];
       for (const n of nodes) {
         const sig = predSignature(n.predecessors);
@@ -1074,34 +1314,80 @@
       }
 
       if (predsChanged.length) {
-        const idList = predsChanged.map(n => encodeURIComponent(n.id)).join(",");
-        await rawPostgrest(
-          "DELETE",
-          `/rest/v1/task_predecessors?task_id=in.(${idList})`,
-          null,
-          "return=minimal",
-          `preds.delete(${predsChanged.length})`
-        );
+        // Build the new edge list FIRST, before deleting anything. That way a
+        // parse blow-up (every entry fails) doesn't silently wipe the existing
+        // server rows. parseFailures > 0 surfaces in the console so we can see
+        // when a CSV import or undo restore introduced unparseable preds.
         const edges = [];
         const seen  = new Set();
+        let parseFailures = 0;
+        const failureSamples = [];
+        const rawSamples     = [];   // raw predecessors strings that produced 0 edges
+        const expectedNonEmpty = []; // tasks whose pred string isn't empty
         for (const n of predsChanged) {
-          if (!n.predecessors) {
-            serverPreds.set(n.id, "");
-            continue;
-          }
+          if (!n.predecessors) continue;
+          expectedNonEmpty.push(n.id);
+          const startEdgeCount = edges.length;
           const parts = String(n.predecessors).split(/[,;]\s*/).map(s => s.trim()).filter(Boolean);
           for (const raw of parts) {
             try {
-              const e = window.Scheduler.parsePredecessor(raw);
+              // Use the inlined parser so we don't depend on the ES module
+              // having loaded yet (file:// CORS, network jitter, etc).
+              const e = parsePredecessorLocal(raw);
               const key = `${n.id}\x00${e.predId}`;
               if (seen.has(key)) continue;
               seen.add(key);
               edges.push({ task_id: n.id, pred_id: e.predId, type: e.type, lag_days: e.lag });
-            } catch (_) {}
+            } catch (err) {
+              parseFailures++;
+              if (failureSamples.length < 5) {
+                failureSamples.push({
+                  taskId: n.id,
+                  raw,
+                  errorMessage: err?.message || String(err),
+                });
+              }
+            }
           }
-          serverPreds.set(n.id, predSignature(n.predecessors));
+          if (edges.length === startEdgeCount && rawSamples.length < 5) {
+            // No edges produced for this task. Show the raw string + split parts
+            // so we can see whether the input itself is unusable or just unparseable.
+            rawSamples.push({
+              id: n.id,
+              raw: JSON.stringify(n.predecessors),
+              partsAfterSplit: parts,
+            });
+          }
+        }
+        if (parseFailures) {
+          console.warn(`[Supa] preds.insert: ${parseFailures} predecessor entries failed to parse (skipped). Samples:`, failureSamples);
+        }
+        if (expectedNonEmpty.length && edges.length === 0) {
+          console.warn(`[Supa] preds.insert: 0 edges produced from ${expectedNonEmpty.length} non-empty pred strings. Raw samples:`, rawSamples);
+        }
+        // Tasks that had non-empty predecessors but ended up with zero parseable
+        // edges → don't wipe their server rows. Better to leave whatever's
+        // there than silently delete and reinsert nothing.
+        const wipingTaskIds = new Set(predsChanged.map(n => n.id));
+        for (const n of predsChanged) {
+          if (!n.predecessors) continue;
+          const hasAnyEdge = edges.some(e => e.task_id === n.id);
+          if (!hasAnyEdge) wipingTaskIds.delete(n.id);
+        }
+
+        if (wipingTaskIds.size) {
+          const idList = [...wipingTaskIds].map(id => encodeURIComponent(id)).join(",");
+          console.log(`[Supa] preds.delete: wiping ${wipingTaskIds.size} task(s) before reinsert`);
+          await rawPostgrest(
+            "DELETE",
+            `/rest/v1/task_predecessors?task_id=in.(${idList})`,
+            null,
+            "return=minimal",
+            `preds.delete(${wipingTaskIds.size})`
+          );
         }
         if (edges.length) {
+          console.log(`[Supa] preds.insert: ${edges.length} edge(s) across ${new Set(edges.map(e => e.task_id)).size} task(s)`);
           await rawPostgrest(
             "POST",
             "/rest/v1/task_predecessors",
@@ -1109,6 +1395,18 @@
             "return=minimal",
             `preds.insert(${edges.length})`
           );
+        } else if (expectedNonEmpty.length) {
+          console.warn(`[Supa] preds.insert: 0 edges to insert despite ${expectedNonEmpty.length} task(s) with non-empty predecessors string — check parsePredecessor failures above`);
+        }
+        // Update the per-task signature cache for everyone we synced. Tasks
+        // we skipped wiping (parse-all-failed) keep their stale signature so
+        // the next save retries.
+        for (const n of predsChanged) {
+          if (!n.predecessors) {
+            serverPreds.set(n.id, "");
+          } else if (wipingTaskIds.has(n.id)) {
+            serverPreds.set(n.id, predSignature(n.predecessors));
+          }
         }
         // Preds saved — clear dirty for any task that's not still flagged by
         // a pending row-level OCC conflict.
@@ -1122,6 +1420,18 @@
       } else if (!inserts.length && !updates.length && !predsChanged.length) {
         // Nothing to do — silent.
       }
+
+      // Tell anyone listening (the AI panel today) which rows landed and
+      // which lost the optimistic-concurrency race. The AI uses this to warn
+      // about pending changes that didn't make it to the server.
+      try {
+        if (typeof window.__onWriteResult === "function") {
+          window.__onWriteResult({
+            writtenIds: [...inserts.map(r => r.id), ...updates.map(u => u.row.id)].filter(id => !conflicts.includes(id)),
+            conflictIds: conflicts.slice(),
+          });
+        }
+      } catch (e) { console.warn("[Supa] onWriteResult hook threw:", e); }
     }
 
     // Refetch one or more rows by id and overwrite their server snapshot.
@@ -1296,6 +1606,8 @@
         }
       }
       try { window.__rerender && window.__rerender(); } catch (_) {}
+      // Let the AI panel rebuild its draft on top of the new server state.
+      try { window.__aiOnRemoteSync && window.__aiOnRemoteSync(); } catch (_) {}
     }
 
     async function applyRemotePredChange(payload) {
@@ -1323,6 +1635,8 @@
         if (idx >= 0) arr[idx].predecessors = predString;
       }
       try { window.__rerender && window.__rerender(); } catch (_) {}
+      // Let the AI panel rebuild its draft on top of the new server state.
+      try { window.__aiOnRemoteSync && window.__aiOnRemoteSync(); } catch (_) {}
     }
 
     // Any change to project_shares affects "what can I edit" — refresh the
@@ -1525,6 +1839,39 @@
       return data?.owner_user_id || null;
     }
 
+    // ─── AI assistant: invoke the chat edge function ───
+    // Returns the parsed operation JSON. Throws on HTTP error.
+    // Pass either a single message string OR an array of { role, content }.
+    // Optional boardContext is a short text summary of the current board —
+    // injected as a second system message so the LLM can resolve hierarchy.
+    async function invokeChat(messageOrMessages, model, boardContext) {
+      const useLocal = SUPA_CONFIG.useLocalEdge === true;
+      const base     = useLocal ? SUPA_CONFIG.localFunctionsBase  : SUPA_CONFIG.supabaseUrl;
+      const apikey   = useLocal ? SUPA_CONFIG.localPublishableKey : SUPA_CONFIG.publishableKey;
+      const url      = `${base}/functions/v1/chat`;
+      const token    = useLocal ? apikey : (supaToken || SUPA_CONFIG.publishableKey);
+      const payload  = { model: model || "haiku" };
+      if (Array.isArray(messageOrMessages)) payload.messages = messageOrMessages;
+      else payload.message = messageOrMessages;
+      if (typeof boardContext === "string" && boardContext.trim()) {
+        payload.boardContext = boardContext;
+      }
+      const res = await loggedFetch(url, {
+        method: "POST",
+        headers: {
+          "apikey": apikey,
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`Chat failed: HTTP ${res.status} — ${text || res.statusText}`);
+      }
+      return await res.json();
+    }
+
     window.Supa = {
       signIn, verifyCode, cancelCode, signOut, loadBoard,
       queueUpsertAll, deleteRows, forceSave, forceSaveWith,
@@ -1533,6 +1880,8 @@
       fetchProjectOwner, refreshEditableProjects, isInCloud,
       // admin
       listAllProfiles, setUserRole,
+      // ai
+      invokeChat,
       // exposed for the share UI
       currentUserId: () => currentUserId,
       currentRole:   () => currentRole,
@@ -1805,6 +2154,26 @@ Phase                                Dur (d)   Predecessor
   let dirty = false;
   let modalIdx = -1;
   let tlRect = null;
+  // View mode controls whether the gantt bars render against actual_* or sched_*.
+  // Persisted to localStorage so a reload remembers the user's preference.
+  let VIEW_MODE = (function () {
+    try { return localStorage.getItem('viewMode') === 'scheduled' ? 'scheduled' : 'actual'; }
+    catch (_) { return 'actual'; }
+  })();
+  function setViewMode(m) {
+    VIEW_MODE = (m === 'scheduled') ? 'scheduled' : 'actual';
+    try { localStorage.setItem('viewMode', VIEW_MODE); } catch (_) {}
+    updateViewToggleUI();
+    render();
+  }
+  function updateViewToggleUI() {
+    document.querySelectorAll('#viewToggle .vt-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.mode === VIEW_MODE);
+    });
+  }
+  // Run once now so the right button shows active even before the first render().
+  try { updateViewToggleUI(); } catch (_) {}
+  window.setViewMode = setViewMode;
   let dateRange = null;
   let drag = null;
 
@@ -2311,8 +2680,17 @@ Phase                                Dur (d)   Predecessor
   /* Full CPM forward + backward pass on one project.
      Forward: snap each leaf's actual_start to max(predecessor end), preserve duration.
      Backward: compute slack (LS - ES) for the critical-path tinting.
-     Skips parent rows (their dates are derived). Returns { shifted, cycle }. */
-  function runCPM(projectId) {
+     Skips parent rows (their dates are derived). Returns { shifted, cycle }.
+
+     mode:
+       'forward' (default) — only push a task forward when it starts before its
+                             predecessor ends. Tasks parked later than required
+                             keep their slack. Used by drag/drop and realtime.
+       'asap'             — snap every task to its earliest possible start in
+                             both directions. Used by the Optimise button and
+                             by AI shift_item so downstream tasks cascade. */
+  function runCPM(projectId, mode) {
+    mode = mode || 'forward';
     const peers = NODES.filter(n => n.id.split('-')[0] === projectId && n.id !== projectId);
     const leaves = peers.filter(n => childrenOf(n).length === 0);
     if (!leaves.length) return { shifted: 0, cycle: false };
@@ -2345,8 +2723,29 @@ Phase                                Dur (d)   Predecessor
     for (const u of order) {
       const n = byId[u];
       if (preds[u].length === 0) {
-        const s = new Date(n.actual_start || n.sched_start);
-        startDate[u] = isNaN(s) ? new Date() : s;
+        const cur   = new Date(n.actual_start || n.sched_start);
+        const sched = new Date(n.sched_start);
+        if (mode === 'asap' && !isNaN(sched)) {
+          // No-pred leaves were previously pinned to their existing actual
+          // date in every mode. That made Optimise a no-op for root tasks
+          // that had drifted later than their baseline (and downstream tasks
+          // inherited the stale anchor, so they didn't move either).
+          //
+          // In ASAP mode, anchor root leaves to sched_start — but never push
+          // them *later* than where they are now (if the user deliberately
+          // dragged a task earlier than the baseline, respect that).
+          const target = (!isNaN(cur) && +cur < +sched) ? cur : sched;
+          if (isNaN(cur) || Math.abs(+cur - +target) > MS_DAY / 2) {
+            n.actual_start = fmtDate(target);
+            n.actual_end   = fmtDate(addDays(target, duration[u]));
+            startDate[u]   = target;
+            shifted++;
+          } else {
+            startDate[u] = cur;
+          }
+        } else {
+          startDate[u] = isNaN(cur) ? new Date() : cur;
+        }
       } else {
         const predEndMs = preds[u].map(p => {
           const pn = byId[p];
@@ -2358,9 +2757,14 @@ Phase                                Dur (d)   Predecessor
         });
         const earliestStart = new Date(Math.max(...predEndMs));
         const curStart = new Date(n.actual_start || n.sched_start);
-        // One-way constraint: shift FORWARD if user is earlier than required.
-        // If they've already pushed it past pred end, leave it alone — that's allowed slack.
-        if (isNaN(curStart) || +curStart < +earliestStart - MS_DAY / 2) {
+        // forward mode: only snap up when starting too early (preserve slack).
+        // asap mode: snap either way to compress the project.
+        const needsSnap = isNaN(curStart) || (
+          mode === 'asap'
+            ? Math.abs(+curStart - +earliestStart) > MS_DAY / 2
+            : +curStart < +earliestStart - MS_DAY / 2
+        );
+        if (needsSnap) {
           n.actual_start = fmtDate(earliestStart);
           n.actual_end   = fmtDate(addDays(earliestStart, duration[u]));
           startDate[u]   = earliestStart;
@@ -2400,18 +2804,28 @@ Phase                                Dur (d)   Predecessor
   }
 
   function recalcAll() {
-    if (!NODES.length) { flashHint('Nothing to recalculate'); return; }
+    if (!NODES.length) { flashHint('Nothing to optimise'); return; }
+    // Scope to the projects currently ticked in the Projects ▾ filter — same
+    // rule as AI editing. If nothing is selected (shouldn't normally happen,
+    // populateFilters seeds it), fall back to every project.
+    const allProjectIds = [...new Set(NODES.map(n => n.id.split('-')[0]))];
+    const inScope = (selectedProjects && selectedProjects.size)
+      ? allProjectIds.filter(p => selectedProjects.has(p))
+      : allProjectIds;
+    if (!inScope.length) { flashHint('No projects selected — adjust the Projects ▾ filter'); return; }
     pushHistory();
-    const projectIds = new Set(NODES.map(n => n.id.split('-')[0]));
     let totalShifted = 0, cycles = 0;
-    projectIds.forEach(pid => {
-      const r = runCPM(pid);
+    inScope.forEach(pid => {
+      const r = runCPM(pid, 'asap');
       if (r.cycle) cycles++;
       totalShifted += r.shifted || 0;
     });
     saveLocal(); render();
-    if (cycles) flashHint(`⚠ ${cycles} project${cycles===1?'':'s'} have predecessor cycles`);
-    else        flashHint(`🔄 CPM done — ${totalShifted} task${totalShifted===1?'':'s'} shifted, critical path updated`);
+    const scopeLabel = inScope.length === allProjectIds.length
+      ? ''
+      : ` (scoped to ${inScope.length} of ${allProjectIds.length} projects)`;
+    if (cycles) flashHint(`⚠ ${cycles} project${cycles===1?'':'s'} have predecessor cycles${scopeLabel}`);
+    else        flashHint(`🚀 Optimised — ${totalShifted} task${totalShifted===1?'':'s'} shifted${scopeLabel}`);
   }
 
   /* ══════════════════════════════════════════════════════════════
@@ -3016,13 +3430,19 @@ Phase                                Dur (d)   Predecessor
                   : critical           ? LEGEND.critical_path_row.color
                                        : '';
 
-      // Bars: draw scheduled bar, optionally an actual bar slightly lower
+      // Bars: which set of dates wins depends on the view toggle in the toolbar.
+      //   actual    → live PM dates, fall back to sched on untouched rows.
+      //   scheduled → baseline only (no fallback) — to see the original plan.
       let barsHtml = '';
-      // For parent rows the bar spans min/max of descendants; leaves use stored dates.
-      // Actuals primary, sched only as fallback.
       const rng = eDateRange(n);
-      const useStart = rng.actualStart || rng.schedStart;
-      const useEnd   = rng.actualEnd   || rng.schedEnd;
+      let useStart, useEnd;
+      if (VIEW_MODE === 'scheduled') {
+        useStart = rng.schedStart;
+        useEnd   = rng.schedEnd;
+      } else {
+        useStart = rng.actualStart || rng.schedStart;
+        useEnd   = rng.actualEnd   || rng.schedEnd;
+      }
 
       if (useStart && useEnd) {
         const sp = pct(useStart), ep = pct(useEnd), w = Math.max(0.5, ep - sp);
@@ -3257,7 +3677,10 @@ Phase                                Dur (d)   Predecessor
     if (pop.dataset.open === which) { pop.style.display = 'none'; pop.dataset.open = ''; return; }
 
     const items = which === 'proj'
-      ? NODES.filter(n => typeFromId(n.id) === 'project').map(n => ({ val: n.id, label: `${n.id} · ${n.name}` }))
+      ? NODES.filter(n => typeFromId(n.id) === 'project')
+          // Numeric collation so P1, P2, P10 sort correctly (otherwise P10 < P2).
+          .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
+          .map(n => ({ val: n.id, label: `${n.id} · ${n.name}` }))
       : [...new Set(NODES.map(n => n.owner).filter(Boolean))].sort().map(o => ({ val: o, label: o }));
     const sel = which === 'proj' ? selectedProjects : selectedOwners;
 
@@ -4622,7 +5045,7 @@ Phase                                Dur (d)   Predecessor
     id:           ['id', 'code', 'wbs'],
     name:         ['project name', 'project task subtask', 'task name', 'project', 'task', 'subtask', 'title', 'activity', 'name'],
     owner:        ['assigned to', 'assignee', 'owner', 'responsible', 'lead', 'manager', 'pm'],
-    predecessors: ['predecessor', 'depends on', 'blocks', 'blocked by', 'dependency'],
+    predecessors: ['predecessor', 'predecessors', 'depends on', 'dependencies', 'blocks', 'blocked by', 'dependency'],
     sched_start:  ['sched start', 'sched. start', 'planned start', 'scheduled start', 'start date', 'start', 'begin', 'kickoff'],
     sched_end:    ['sched end', 'sched. end', 'planned end', 'scheduled end', 'end date', 'end', 'finish', 'due', 'deadline'],
     actual_start: ['actual start', 'real start'],
@@ -5608,6 +6031,2776 @@ Phase                                Dur (d)   Predecessor
     push(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`);
     return new Blob(parts, { type: 'application/pdf' });
   }
+
+  /* ══════════════════════════════════════════════════════════════
+     AI EDITING — natural-language project edits via LLM
+
+     The LLM only extracts intent (see supabase/functions/chat). All
+     mutation happens here, against a draft copy of NODES:
+       1. user types a command → invokeChat → structured operation JSON
+       2. resolve target by fuzzy-matching against NODES (Fuse.js)
+       3. apply operation to draft (structuredClone of NODES)
+       4. run CPM on the affected project(s) of the draft
+       5. show a preview of changed/added rows
+       6. user can stack more changes, or Approve/Discard.
+     Approve copies field-by-field into real NODES and calls saveLocal()
+     to route through the existing version-checked upsertAll path.
+  ══════════════════════════════════════════════════════════════ */
+  const AI = {
+    draft: null,            // array of cloned nodes; null when no draft active
+    baseSnapshot: null,     // JSON of NODES at the moment the draft was created
+    pendingChanges: [],     // operation log (for preview + future replay)
+    defaultModel: 'haiku',  // Haiku by default — fastest, cheapest, good enough for intent extraction
+    clarifications: {},     // stashId -> { operation, sourceText, candidates, kind }
+    clarifyCounter: 0,
+    chatHistory: [],        // rolling { role, content } buffer sent with each request
+    // Rows the most recent Approve attempted to write. The supabase module
+    // fires window.__onWriteResult with the conflict list; if any of these
+    // IDs show up there within a short window, surface the OCC failure.
+    pendingApproveIds: null,
+    // Compound-prompt queue: the LLM may return multiple ops in one response.
+    // After the batch confirm UI, the picked ops sit here in order and get
+    // dispatched one at a time as each commit/clarification resolves.
+    opQueue: [],
+    opSourceText: '',
+  };
+  const AI_HISTORY_MAX = 12; // ~6 turns. Cap to keep token usage bounded.
+  function aiNewClarifyId() { return 'cl' + (++AI.clarifyCounter); }
+  function aiPushHistory(role, content) {
+    if (role !== 'user' && role !== 'assistant') return;
+    if (typeof content !== 'string' || !content.trim()) return;
+    AI.chatHistory.push({ role, content });
+    if (AI.chatHistory.length > AI_HISTORY_MAX) {
+      AI.chatHistory = AI.chatHistory.slice(-AI_HISTORY_MAX);
+    }
+  }
+
+  // ---- Fuse-based fuzzy matching ----
+  // Threshold 0.5 is forgiving enough to catch typos like "mulgrve" → "Mulgrave"
+  // without going totally wild. Confidence is judged separately — see
+  // aiMatchProject / aiMatchItem below.
+  // Return only the nodes whose root project is in the current `selectedProjects`
+  // filter. If the filter is empty or contains every project, returns the array
+  // unchanged. This is the "AI can only edit what's selected" guardrail —
+  // mirrors what render() shows.
+  function aiScopedNodes(nodes) {
+    if (!selectedProjects || !selectedProjects.size) return nodes;
+    const projIds = nodes.filter(n => typeFromId(n.id) === 'project').map(n => n.id);
+    if (projIds.length && projIds.every(id => selectedProjects.has(id))) return nodes;
+    return nodes.filter(n => selectedProjects.has(n.id.split('-')[0]));
+  }
+
+  function aiFuse(pool, keys) {
+    if (typeof Fuse === 'undefined') return null;
+    return new Fuse(pool, {
+      keys: keys || ['name'],
+      includeScore: true,
+      threshold: 0.5,
+      ignoreLocation: true,
+      minMatchCharLength: 2,
+    });
+  }
+  // Decide whether the best Fuse hit is good enough to apply directly.
+  // Confident iff: best score < 0.15 and (single hit OR gap to 2nd > 0.15).
+  function aiIsConfident(hits) {
+    if (!hits.length) return false;
+    const best = hits[0].score ?? 1;
+    if (best > 0.15) return false;
+    if (hits.length === 1) return true;
+    return (hits[1].score - hits[0].score) > 0.15;
+  }
+
+  // Match the project node. Returns { confident: <Node|null>, candidates: Node[] }.
+  // Pass { ignoreScope: true } to skip the selectedProjects filter — used by
+  // aiResolveTarget to detect "exists but not in your filter" cases.
+  function aiMatchProject(query, nodes, opts) {
+    if (!query || query === 'N/A') return { confident: null, candidates: [] };
+    const scoped = (opts && opts.ignoreScope) ? nodes : aiScopedNodes(nodes);
+    const projects = scoped.filter(n => typeFromId(n.id) === 'project');
+    if (!projects.length) return { confident: null, candidates: [] };
+    const idHit = projects.find(p => p.id.toLowerCase() === query.toLowerCase());
+    if (idHit) return { confident: idHit, candidates: [idHit] };
+    const fuse = aiFuse(projects, ['name']);
+    let hits = [];
+    if (fuse) {
+      hits = fuse.search(query);
+    } else {
+      const q = query.toLowerCase();
+      hits = projects
+        .filter(p => (p.name || '').toLowerCase().includes(q))
+        .map(p => ({ item: p, score: 0 }));
+    }
+    if (!hits.length) return { confident: null, candidates: [] };
+    const top5 = hits.slice(0, 5).map(h => h.item);
+    return { confident: aiIsConfident(hits) ? hits[0].item : null, candidates: top5 };
+  }
+
+  // Match a task/subtask. Returns { confident, candidates }.
+  function aiMatchItem(query, nodes, projectNode, itemType, opts) {
+    if (!query || query === 'N/A') return { confident: null, candidates: [] };
+    const scoped = (opts && opts.ignoreScope) ? nodes : aiScopedNodes(nodes);
+    const pool = projectNode
+      ? scoped.filter(n => n.id.split('-')[0] === projectNode.id && n.id !== projectNode.id)
+      : scoped.filter(n => typeFromId(n.id) !== 'project');
+    if (!pool.length) return { confident: null, candidates: [] };
+
+    const idHit = pool.find(n => n.id.toLowerCase() === query.toLowerCase());
+    if (idHit) return { confident: idHit, candidates: [idHit] };
+
+    const fuse = aiFuse(pool, ['name']);
+    let hits = fuse
+      ? fuse.search(query)
+      : pool
+          .filter(n => (n.name || '').toLowerCase().includes(query.toLowerCase()))
+          .map(n => ({ item: n, score: 0 }));
+
+    if (!hits.length) return { confident: null, candidates: [] };
+
+    if (itemType === 'task' || itemType === 'subtask') {
+      const narrowed = hits.filter(h => typeFromId(h.item.id) === itemType);
+      if (narrowed.length) hits = narrowed;
+    }
+    const top5 = hits.slice(0, 5).map(h => h.item);
+    return { confident: aiIsConfident(hits) ? hits[0].item : null, candidates: top5 };
+  }
+
+  // Build a compact tree of the projects in scope (selectedProjects, or all
+  // when none ticked) so the LLM can resolve hierarchy without guessing.
+  // Format keeps tokens low: one indented line per row with ID + name.
+  // Owners-in-use are appended as a one-line summary so the LLM can pick
+  // an existing owner over inventing a new one.
+  function aiBuildBoardContext() {
+    const projects = NODES
+      .filter(n => typeFromId(n.id) === 'project')
+      .filter(n => !selectedProjects || !selectedProjects.size || selectedProjects.has(n.id))
+      .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+    if (!projects.length) return '';
+    const lines = ['Projects in scope:'];
+    for (const p of projects) {
+      lines.push(`- ${p.id} ${p.name || '(unnamed)'}`);
+      const tasks = NODES
+        .filter(n => parentOf(n.id) === p.id)
+        .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+      for (const t of tasks) {
+        lines.push(`  - ${t.id} ${t.name || '(unnamed)'}`);
+        const subs = NODES
+          .filter(n => parentOf(n.id) === t.id)
+          .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+        for (const s of subs) {
+          lines.push(`    - ${s.id} ${s.name || '(unnamed)'}`);
+        }
+      }
+    }
+    const owners = [...new Set(NODES.map(n => (n.owner || '').trim()).filter(Boolean))].sort();
+    if (owners.length) {
+      lines.push('');
+      lines.push(`Owners currently in use: ${owners.join(', ')}.`);
+    }
+    return lines.join('\n');
+  }
+
+  // Match an owner string against the owners already in use across the
+  // board. The pool is the deduplicated set of non-empty `owner` strings
+  // on every row in `nodes` — same source as the "Filter owners" dropdown
+  // in the toolbar. Returns
+  //   { confident: <{name, count}|null>, candidates: [{name, count}, …] }
+  // Typing "jack" should match "Jack Zhou" without prompting if there's
+  // only one jack-* on the board; if there are two jacks both come back
+  // as candidates for the owner picker.
+  function aiMatchOwner(query, nodes) {
+    if (!query || query === 'N/A') return { confident: null, candidates: [] };
+    const tally = new Map();
+    for (const n of (nodes || [])) {
+      const o = (n.owner || '').trim();
+      if (!o) continue;
+      tally.set(o, (tally.get(o) || 0) + 1);
+    }
+    if (!tally.size) return { confident: null, candidates: [] };
+    const pool = [...tally.entries()].map(([name, count]) => ({ name, count }));
+    // Exact match shortcut — case-insensitive equality wins immediately.
+    const exact = pool.find(p => p.name.toLowerCase() === query.toLowerCase());
+    if (exact) return { confident: exact, candidates: [exact] };
+    const fuse = aiFuse(pool, ['name']);
+    let hits = [];
+    if (fuse) {
+      hits = fuse.search(query);
+    } else {
+      const q = query.toLowerCase();
+      hits = pool
+        .filter(p => p.name.toLowerCase().includes(q))
+        .map(p => ({ item: p, score: 0 }));
+    }
+    if (!hits.length) return { confident: null, candidates: [] };
+    const top5 = hits.slice(0, 5).map(h => h.item);
+    return { confident: aiIsConfident(hits) ? hits[0].item : null, candidates: top5 };
+  }
+
+  // Resolve an operation target. Returns one of:
+  //   { ok: true,  id, candidates }
+  //   { ok: false, kind: 'project'|'item'|'none', candidates, reason }
+  // Honours target._pinnedId (set by a user candidate click) above all else.
+  function aiResolveTarget(target, nodes) {
+    if (target && target._pinnedId) {
+      const n = nodes.find(x => x.id === target._pinnedId);
+      if (n) return { ok: true, id: n.id, candidates: [n] };
+    }
+    const pm = aiMatchProject(target.project, nodes);
+    // No item asked for → just need the project.
+    if (!target.item || target.item === 'N/A') {
+      if (pm.confident) return { ok: true, id: pm.confident.id, candidates: [pm.confident] };
+      if (pm.candidates.length) {
+        return { ok: false, kind: 'project', candidates: pm.candidates,
+                 reason: `Which project did you mean for "${target.project}"?` };
+      }
+      // Nothing in scope. Maybe it exists outside the current project filter?
+      const unscopedPm = aiMatchProject(target.project, nodes, { ignoreScope: true });
+      if (unscopedPm.confident || unscopedPm.candidates.length) {
+        return { ok: false, kind: 'out_of_scope', candidates: [],
+                 reason: `"${target.project}" isn't in your current project filter — tick it under the Projects ▾ dropdown to edit it.` };
+      }
+      return { ok: false, kind: 'none', candidates: [],
+               reason: `Couldn't find project "${target.project}".` };
+    }
+    // Item asked for. If the project is uncertain, ask about that first.
+    if (target.project && target.project !== 'N/A' && !pm.confident && pm.candidates.length) {
+      return { ok: false, kind: 'project', candidates: pm.candidates,
+               reason: `Which project did you mean for "${target.project}"?` };
+    }
+    const im = aiMatchItem(target.item, nodes, pm.confident, target.item_type);
+    if (im.confident) return { ok: true, id: im.confident.id, candidates: [im.confident] };
+    if (im.candidates.length) {
+      return { ok: false, kind: 'item', candidates: im.candidates,
+               reason: `Which one did you mean for "${target.item}"?` };
+    }
+    // Last resort: if we had project candidates from a vague query, surface those.
+    if (pm.candidates.length && !pm.confident) {
+      return { ok: false, kind: 'project', candidates: pm.candidates,
+               reason: `No "${target.item}" found — pick a project to narrow.` };
+    }
+    // Still nothing — maybe the project (or the item within an unscoped project) is hidden by the filter.
+    if (target.project && target.project !== 'N/A') {
+      const unscopedPm = aiMatchProject(target.project, nodes, { ignoreScope: true });
+      if (unscopedPm.confident || unscopedPm.candidates.length) {
+        return { ok: false, kind: 'out_of_scope', candidates: [],
+                 reason: `"${target.project}" isn't in your current project filter — tick it under the Projects ▾ dropdown to edit it.` };
+      }
+    } else {
+      const unscopedIm = aiMatchItem(target.item, nodes, null, target.item_type, { ignoreScope: true });
+      if (unscopedIm.confident || unscopedIm.candidates.length) {
+        const where = unscopedIm.confident
+          ? (nodes.find(n => n.id === unscopedIm.confident.id.split('-')[0])?.name || unscopedIm.confident.id.split('-')[0])
+          : 'another project';
+        return { ok: false, kind: 'out_of_scope', candidates: [],
+                 reason: `"${target.item}" is in ${where}, which isn't in your current project filter — tick it under Projects ▾ to edit.` };
+      }
+    }
+    return { ok: false, kind: 'none', candidates: [],
+             reason: `Couldn't find "${target.item}"${pm.confident ? ` in ${pm.confident.name}` : ''}.` };
+  }
+
+  // ---- date helpers ----
+  function aiAmountToDays(amount, unit) {
+    const a = typeof amount === 'number' ? amount : parseFloat(amount);
+    if (!Number.isFinite(a)) return 0;
+    if (unit === 'weeks')  return Math.round(a * 7);
+    if (unit === 'months') return Math.round(a * 30);
+    return Math.round(a); // days, or unknown unit → treat as days
+  }
+  // Parse a deadline/date string. Returns ISO yyyy-mm-dd or null.
+  function aiParseDate(text) {
+    if (!text || text === 'N/A') return null;
+    const iso = new Date(text);
+    if (!isNaN(+iso) && /\d/.test(text)) return fmtDate(iso);
+    const lower = text.toLowerCase();
+    const days = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+    const m = lower.match(/(next |this )?(sunday|monday|tuesday|wednesday|thursday|friday|saturday)/);
+    if (m) {
+      const target = days.indexOf(m[2]);
+      const today = new Date();
+      let delta = (target - today.getDay() + 7) % 7;
+      if (delta === 0 || m[1] === 'next ') delta = delta + 7;
+      return fmtDate(addDays(today, delta));
+    }
+    return null;
+  }
+
+  // ---- run CPM on a draft array without disturbing real NODES ----
+  // CPM helpers (runCPM, childrenOf, eDateRange…) close over the `NODES`
+  // binding, so the cleanest way to point them at a draft is to swap the
+  // contents of NODES, run, then restore. Synchronous throughout.
+  function aiRunCPMOnDraft(draft, projectIds, mode) {
+    // mode:
+    //   'forward' — constraint check only; preserves explicit user dates.
+    //               Used after shift_item / update_item duration so the user's
+    //               Δ doesn't get snapped back to predEnd by ASAP.
+    //   'asap'    — full optimise compression. Used after structural ops
+    //               (create, delete, add_dependency, rename/budget) where
+    //               the AI should always leave the project optimally scheduled.
+    mode = mode === 'asap' ? 'asap' : 'forward';
+    const real = NODES.slice();
+    NODES.length = 0;
+    for (const n of draft) NODES.push(n);
+    const cycles = [];
+    for (const pid of projectIds) {
+      try {
+        const r = runCPM(pid, mode);
+        if (r && r.cycle) cycles.push(pid);
+      } catch (e) {
+        console.warn('[AI] CPM on draft failed for', pid, e);
+      }
+    }
+    const out = NODES.slice();
+    NODES.length = 0;
+    for (const n of real) NODES.push(n);
+    return { draft: out, cycles };
+  }
+  // Same swap trick to let nextId() count against the draft.
+  function aiWithDraftScope(draft, fn) {
+    const real = NODES.slice();
+    NODES.length = 0;
+    for (const n of draft) NODES.push(n);
+    try { return fn(); }
+    finally {
+      NODES.length = 0;
+      for (const n of real) NODES.push(n);
+    }
+  }
+
+  // ---- operation appliers — mutate the draft array ----
+  function aiApplyOperation(op, draft) {
+    switch (op.operation) {
+      case 'shift_item':      return aiApplyShift(op, draft);
+      case 'update_progress': return aiApplyProgress(op, draft);
+      case 'assign_owner':    return aiApplyOwner(op, draft);
+      case 'create_item':     return aiApplyCreate(op, draft);
+      case 'add_dependency':  return aiApplyAddDependency(op, draft);
+      case 'delete_item':     return aiApplyDelete(op, draft);
+      case 'update_item':     return aiApplyUpdate(op, draft);
+      default:
+        return { ok: false, reason: `Unsupported operation: ${op.operation}` };
+    }
+  }
+
+  // ---- query_schedule — read-only, returns a human-readable summary ----
+  function aiApplyQuery(op, nodes) {
+    const res = aiResolveTarget(op.target, nodes);
+    if (!res.ok) return { ok: false, reason: res.reason, candidates: res.candidates, kind: res.kind };
+    const node = nodes.find(n => n.id === res.id);
+    if (!node) return { ok: false, reason: 'Target not found.' };
+
+    // Re-run CPM on a clone so we report up-to-date computed dates without
+    // touching real NODES. This keeps the answer accurate even if the user
+    // dragged things around but hasn't hit Optimise yet.
+    const clone = structuredClone(nodes);
+    const r = aiRunCPMOnDraft(clone, [res.id.split('-')[0]]);
+    const live = r.draft.find(n => n.id === res.id) || node;
+
+    // Read fields via the same helpers the UI uses so parents roll up properly.
+    const real = NODES; // for the rollup helpers
+    const savedNodes = NODES.slice();
+    NODES.length = 0; for (const n of clone) NODES.push(n);
+    let pd, rng;
+    try {
+      pd  = ePercentDone(live);
+      rng = eDateRange(live);
+    } finally {
+      NODES.length = 0; for (const n of savedNodes) NODES.push(n);
+    }
+
+    const fmt = (v) => v || '—';
+    const lines = [];
+    lines.push(`📋 ${live.id} · ${live.name || '(unnamed)'} (${typeFromId(live.id)})`);
+    if (live.owner) lines.push(`Owner: ${live.owner}`);
+    lines.push(`Progress: ${(pd ?? 0).toFixed(pd % 1 ? 1 : 0)}%`);
+    lines.push(`Scheduled: ${fmt(rng.schedStart)} → ${fmt(rng.schedEnd)}`);
+    lines.push(`Actual:    ${fmt(rng.actualStart)} → ${fmt(rng.actualEnd)}`);
+    if (live.slack !== '' && live.slack != null) {
+      lines.push(`Slack: ${live.slack} day${String(live.slack) === '1' ? '' : 's'}${String(live.slack) === '0' ? ' ★ critical path' : ''}`);
+    }
+    if (live.predecessors) lines.push(`Predecessors: ${live.predecessors}`);
+    return { ok: true, targetId: res.id, text: lines.join('\n') };
+  }
+
+  function aiApplyShift(op, draft) {
+    const res = aiResolveTarget(op.target, draft);
+    if (!res.ok) return { ok: false, reason: res.reason, candidates: res.candidates };
+    const days = aiAmountToDays(op.parameters.amount, op.parameters.unit);
+    if (!days) return { ok: false, reason: 'Invalid shift amount.' };
+    const sign = op.parameters.direction === 'earlier' ? -1 : 1;
+    const delta = sign * days;
+    const fieldChoice = op.parameters._fieldChoice === 'scheduled' ? 'scheduled' : 'actual';
+    const modeChoice  = op.parameters._modeChoice  === 'extend'    ? 'extend'    : 'shift';
+
+    // 1. Leaf rows under the target (dates live on leaves only).
+    const subtreeLeaves = [];
+    (function collectLeaves(id) {
+      const kids = draft.filter(c => parentOf(c.id) === id);
+      if (!kids.length) subtreeLeaves.push(id);
+      else for (const k of kids) collectLeaves(k.id);
+    })(res.id);
+    const subtreeLeafSet = new Set(subtreeLeaves);
+
+    // 2. Scoped cascade — BFS the predecessor graph to collect every leaf
+    //    transitively downstream of the target. Unrelated leaves stay put.
+    const allLeaves = draft.filter(n => !draft.some(c => parentOf(c.id) === n.id));
+    const succMap = new Map(allLeaves.map(n => [n.id, []]));
+    for (const n of allLeaves) {
+      const preds = parsePreds(n.predecessors).filter(p => succMap.has(p));
+      for (const p of preds) succMap.get(p).push(n.id);
+    }
+    const toShift = new Set(subtreeLeaves);
+    const queue = [...subtreeLeaves];
+    while (queue.length) {
+      const u = queue.shift();
+      for (const v of (succMap.get(u) || [])) {
+        if (!toShift.has(v)) { toShift.add(v); queue.push(v); }
+      }
+    }
+
+    // 3. Apply Δ. Field semantics:
+    //    - mode 'shift'  : start+end both move (duration unchanged) on every leaf.
+    //    - mode 'extend' : target leaves move ONLY the end (duration grows/shrinks);
+    //                      downstream cascade leaves still move start+end together
+    //                      because their predecessor's end moved by Δ and they're
+    //                      just being carried along — their own duration is preserved.
+    //    For actual shifts, seed actual_* from sched_* on untouched leaves first
+    //    so there's a date to move.
+    for (const id of toShift) {
+      const n = draft.find(x => x.id === id);
+      if (!n) continue;
+      if (fieldChoice === 'actual') {
+        if (!n.actual_start && n.sched_start) n.actual_start = n.sched_start;
+        if (!n.actual_end   && n.sched_end)   n.actual_end   = n.sched_end;
+      }
+      const isExtendedLeaf = modeChoice === 'extend' && subtreeLeafSet.has(id);
+      const fields = isExtendedLeaf
+        ? (fieldChoice === 'scheduled' ? ['sched_end']           : ['actual_end'])
+        : (fieldChoice === 'scheduled' ? ['sched_start','sched_end']
+                                       : ['actual_start','actual_end']);
+      for (const f of fields) {
+        if (n[f]) {
+          const d = new Date(n[f]);
+          if (!isNaN(+d)) n[f] = fmtDate(addDays(d, delta));
+        }
+      }
+    }
+
+    return {
+      ok: true,
+      targetId: res.id,
+      leafIds: [...toShift],
+      delta,
+      fieldChoice,
+      modeChoice,
+      cascadeCount: toShift.size - subtreeLeaves.length,
+    };
+  }
+
+  function aiApplyProgress(op, draft) {
+    const res = aiResolveTarget(op.target, draft);
+    if (!res.ok) return { ok: false, reason: res.reason, candidates: res.candidates };
+    let pct = op.parameters.percent_done;
+    if (pct === 'N/A' || pct == null) {
+      const s = (op.parameters.status || '').toLowerCase();
+      if (s === 'completed' || s === 'complete' || s === 'done') pct = 100;
+      else if (s === 'in_progress' || s === 'started' || s === 'in-progress') pct = 50;
+      else return { ok: false, reason: 'No percent_done or status given.' };
+    }
+    pct = Math.max(0, Math.min(100, Number(pct)));
+    // Percent_done is only stored on leaves; rolled up onto parents. If the
+    // user pointed at a parent, push the % to every leaf below.
+    const targetNode = draft.find(n => n.id === res.id);
+    const isLeaf = !draft.some(c => parentOf(c.id) === targetNode.id);
+    if (isLeaf) {
+      targetNode.percent_done = pct;
+    } else {
+      const leaves = draft.filter(n =>
+        n.id.startsWith(targetNode.id + '-') &&
+        !draft.some(c => parentOf(c.id) === n.id)
+      );
+      leaves.forEach(n => { n.percent_done = pct; });
+    }
+    return { ok: true, targetId: res.id, percent_done: pct };
+  }
+
+  function aiApplyOwner(op, draft) {
+    const res = aiResolveTarget(op.target, draft);
+    if (!res.ok) return { ok: false, reason: res.reason, candidates: res.candidates };
+    const owner = (op.parameters.owner || '').trim();
+    if (!owner || owner === 'N/A') return { ok: false, reason: 'No owner specified.' };
+    // Owner clarification — fuzzy-match against the owners already in use
+    // on the board unless the user already disambiguated via the picker.
+    if (!op.parameters._ownerResolved) {
+      const om = aiMatchOwner(owner, draft);
+      if (om.confident) {
+        op.parameters.owner = om.confident.name;
+      } else if (om.candidates.length) {
+        return {
+          ok: false, kind: 'owner', candidates: om.candidates,
+          queriedName: owner,
+          reason: `Which owner did you mean by "${owner}"?`,
+        };
+      }
+      // No hits → fall through with the freeform string (a brand-new owner).
+    }
+    const finalOwner = (op.parameters.owner || '').trim();
+    const node = draft.find(n => n.id === res.id);
+    node.owner = finalOwner;
+    return { ok: true, targetId: res.id, owner: finalOwner };
+  }
+
+  function aiApplyCreate(op, draft) {
+    // Owner clarification gate — same as aiApplyOwner. If the LLM included
+    // an owner string, match it against the owners already on the board
+    // before stamping it on the new row. Skipped when _ownerResolved is
+    // set by the picker.
+    const ownerRaw = (op.parameters.owner || '').trim();
+    if (ownerRaw && ownerRaw !== 'N/A' && !op.parameters._ownerResolved) {
+      const om = aiMatchOwner(ownerRaw, draft);
+      if (om.confident) {
+        op.parameters.owner = om.confident.name;
+      } else if (om.candidates.length) {
+        return {
+          ok: false, kind: 'owner', candidates: om.candidates,
+          queriedName: ownerRaw,
+          reason: `Which owner did you mean by "${ownerRaw}"?`,
+        };
+      }
+    }
+
+    // ── item_type === 'project' → new top-level project, no parent needed ──
+    if (op.target.item_type === 'project') {
+      const newId = aiWithDraftScope(draft, () => nextId(null));
+      const today = new Date();
+      let dur = 30;
+      if (op.parameters.duration && op.parameters.duration !== 'N/A') {
+        const dnum = aiAmountToDays(parseFloat(op.parameters.duration), 'days');
+        if (dnum > 0) dur = dnum;
+      }
+      const deadline = aiParseDate(op.parameters.deadline) || aiParseDate(op.parameters.date);
+      const end   = deadline || fmtDate(addDays(today, dur));
+      const start = fmtDate(addDays(new Date(end), -dur));
+      const newNode = aiBuildNode(newId, 'project',
+        op.target.item && op.target.item !== 'N/A' ? op.target.item : 'New project',
+        op.parameters.owner, start, end);
+      draft.push(newNode);
+      return { ok: true, targetId: newId, created: newNode };
+    }
+
+    // ── task / subtask: needs an existing project. Honour the pinned parent
+    //    set by a candidate-button click; otherwise fuzzy-match the project. ──
+    let parentId, newType;
+    if (op.target._pinnedParentId) {
+      const pinned = draft.find(n => n.id === op.target._pinnedParentId);
+      if (!pinned) return { ok: false, reason: 'Pinned parent no longer exists.' };
+      parentId = pinned.id;
+      // Type derives from where we're inserting: under a project → task,
+      // under a task → subtask. The LLM's item_type is a hint, but the parent
+      // dictates the actual level.
+      newType = typeFromId(pinned.id) === 'project' ? 'task' : 'subtask';
+    } else {
+      if (!op.target.project || op.target.project === 'N/A') {
+        return { ok: false, reason: 'Project name required to create an item.', kind: 'none', candidates: [] };
+      }
+      const pm = aiMatchProject(op.target.project, draft);
+      if (!pm.confident && pm.candidates.length) {
+        return { ok: false, reason: `Which project should I add "${op.target.item}" to?`,
+                 kind: 'project', candidates: pm.candidates };
+      }
+      if (!pm.confident) {
+        return { ok: false, reason: `Project "${op.target.project}" not found.`,
+                 kind: 'none', candidates: [] };
+      }
+      const project = pm.confident;
+      parentId = project.id;
+      newType = op.target.item_type === 'subtask' ? 'subtask' : 'task';
+
+      // If subtask, route under a matching task — either parent name or first task.
+      if (newType === 'subtask') {
+        const tasks = draft.filter(n =>
+          parentOf(n.id) === project.id && typeFromId(n.id) === 'task');
+        if (op.target.parent && op.target.parent !== 'N/A' && tasks.length) {
+          const fuse = aiFuse(tasks, ['name']);
+          const hits = fuse ? fuse.search(op.target.parent) : [];
+          if (hits.length) parentId = hits[0].item.id;
+          else if (tasks.length === 1) parentId = tasks[0].id;
+          else {
+            return { ok: false,
+                     reason: `Which task under ${project.name} should the subtask go under?`,
+                     kind: 'project', candidates: tasks };
+          }
+        } else if (tasks.length === 1) {
+          parentId = tasks[0].id;
+        } else if (tasks.length > 1) {
+          return { ok: false,
+                   reason: `Which task under ${project.name} should the subtask go under?`,
+                   kind: 'project', candidates: tasks };
+        } else {
+          // Project has no tasks yet — fall back to creating a task instead.
+          newType = 'task';
+          parentId = project.id;
+        }
+      }
+    }
+
+    const newId = aiWithDraftScope(draft, () => nextId(parentId));
+
+    // Date window: if a deadline is given, anchor the end to it and back off
+    // by the stated duration. Otherwise start today.
+    const today = new Date();
+    let dur = newType === 'subtask' ? 3 : 7;
+    if (op.parameters.duration && op.parameters.duration !== 'N/A') {
+      const dnum = aiAmountToDays(parseFloat(op.parameters.duration), 'days');
+      if (dnum > 0) dur = dnum;
+    }
+    const deadline = aiParseDate(op.parameters.deadline) || aiParseDate(op.parameters.date);
+    let start, end;
+    if (deadline) {
+      end   = deadline;
+      start = fmtDate(addDays(new Date(end), -dur));
+    } else {
+      start = fmtDate(today);
+      end   = fmtDate(addDays(today, dur));
+    }
+
+    const newNode = aiBuildNode(newId, newType,
+      op.target.item && op.target.item !== 'N/A' ? op.target.item : 'New ' + newType,
+      op.parameters.owner, start, end);
+    // Push first so predecessor cycle checks can see the new row.
+    draft.push(newNode);
+
+    // Apply predecessors if the create_item operation includes them. This
+    // is how cascading commands ("add subtask X under Y, predecessor Z and W")
+    // get bundled into a single op — the row is created and wired up at the
+    // same time, instead of being split into create + add_dependency + ...
+    const predResult = aiResolveCreatePredecessors(op, draft, newNode);
+    if (!predResult.ok) {
+      const idx = draft.findIndex(n => n.id === newNode.id);
+      if (idx >= 0) draft.splice(idx, 1);
+      return {
+        ok: false,
+        reason: predResult.reason || 'Could not resolve predecessors for the new item.',
+        kind: 'none',
+        candidates: [],
+      };
+    }
+    if (predResult.predIds.length) {
+      newNode.predecessors = predResult.predIds.join(', ');
+    }
+    return { ok: true, targetId: newId, created: newNode, predIds: predResult.predIds };
+  }
+
+  // Build a fresh NODES-shaped row with sensible defaults.
+  function aiBuildNode(id, type, name, owner, schedStart, schedEnd) {
+    return {
+      id,
+      type,
+      name: name || ('New ' + type),
+      owner: (owner && owner !== 'N/A') ? owner : '',
+      predecessors: '',
+      sched_start: schedStart || '',
+      sched_end:   schedEnd   || '',
+      actual_start: '',
+      actual_end:   '',
+      slack: '',
+      percent_done: 0,
+      est_cost: 0,
+      cost_to_date: 0,
+      sale_price: 0,
+      collapsed: false,
+    };
+  }
+
+  // Walk the predecessor graph from `startId` upward. Returns true if `targetId`
+  // is reachable — i.e. adding `startId` as a predecessor of `targetId` would
+  // close the loop. Depth-bounded to defend against pre-existing cycles.
+  function aiPredCreatesCycle(draft, targetId, startId) {
+    if (startId === targetId) return true;
+    const seen = new Set();
+    const stack = [startId];
+    while (stack.length) {
+      const id = stack.pop();
+      if (seen.has(id)) continue;
+      seen.add(id);
+      if (seen.size > 1000) return false; // sanity bail-out
+      const n = draft.find(x => x.id === id);
+      if (!n) continue;
+      const preds = parsePreds(n.predecessors || '');
+      for (const p of preds) {
+        if (p === targetId) return true;
+        if (!seen.has(p)) stack.push(p);
+      }
+    }
+    return false;
+  }
+
+  // Normalise op.parameters.predecessors / predecessor into a list of
+  // user-supplied name strings. Accepts arrays, comma/semicolon/"and"-
+  // delimited strings, or a single name. Drops "N/A" entries.
+  function aiNormalisePredNames(value) {
+    if (!value || value === 'N/A') return [];
+    if (Array.isArray(value)) {
+      return value.flatMap(v => aiNormalisePredNames(v)).filter(Boolean);
+    }
+    return String(value)
+      .split(/[,;]| and | & /i)
+      .map(s => s.trim())
+      .filter(Boolean)
+      .filter(s => s !== 'N/A');
+  }
+
+  // Build a flat searchable pool — one entry per non-project node — where
+  // each entry exposes the node's own name plus a breadcrumb formed by
+  // concatenating its name with every ancestor's name up to the project.
+  // Example: a "Solar panels" subtask under "Equipment Procurement" in
+  // "Mulgrave" gets breadcrumb "solar panels equipment procurement
+  // mulgrave". A multi-word query like "solar procurement" then matches
+  // it over a sibling "Solar install" (whose breadcrumb is "solar install
+  // inverter install mulgrave"), because the breadcrumb has more shared
+  // tokens. Scoped to a single project when projectNode is provided.
+  function aiBreadcrumbPool(nodes, projectNode) {
+    const byId = new Map(nodes.map(n => [n.id, n]));
+    const pool = [];
+    for (const n of nodes) {
+      if (typeFromId(n.id) === 'project') continue;
+      if (projectNode && n.id.split('-')[0] !== projectNode.id) continue;
+      const parts = [n.name || ''];
+      let cur = n;
+      while (true) {
+        const pid = parentOf(cur.id);
+        if (!pid) break;
+        const parent = byId.get(pid);
+        if (!parent) break;
+        parts.push(parent.name || '');
+        cur = parent;
+      }
+      pool.push({
+        item: n,
+        name: n.name || '',
+        breadcrumb: parts.filter(Boolean).join(' '),
+      });
+    }
+    return pool;
+  }
+
+  // Looser predecessor matcher — phrases like "solar procurement" are
+  // short and span hierarchy, so we search a breadcrumb pool with Fuse
+  // (weighted toward the breadcrumb field). Falls back to a token-overlap
+  // substring score when Fuse isn't loaded.
+  function aiBestItemMatchLoose(query, nodes, projectNode) {
+    if (!query || query === 'N/A') return { confident: null, candidates: [] };
+    const pool = aiBreadcrumbPool(nodes, projectNode);
+    if (!pool.length) return { confident: null, candidates: [] };
+    // Direct id hit wins over everything.
+    const idHit = pool.find(p => p.item.id.toLowerCase() === query.toLowerCase());
+    if (idHit) return { confident: idHit.item, candidates: [idHit.item] };
+
+    if (typeof Fuse !== 'undefined') {
+      const fuse = new Fuse(pool, {
+        keys: [
+          { name: 'breadcrumb', weight: 0.7 },
+          { name: 'name',       weight: 0.3 },
+        ],
+        includeScore: true,
+        threshold: 0.5,
+        ignoreLocation: true,
+        minMatchCharLength: 2,
+      });
+      const hits = fuse.search(query);
+      if (!hits.length) return { confident: null, candidates: [] };
+      const bestScore = hits[0].score ?? 1;
+      const confident = bestScore <= 0.35 ? hits[0].item.item : null;
+      return { confident, candidates: hits.slice(0, 5).map(h => h.item.item) };
+    }
+
+    // No Fuse — score by how many query tokens appear in each breadcrumb.
+    // Confident only when one entry strictly beats every other.
+    const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return { confident: null, candidates: [] };
+    const scored = pool.map(p => {
+      const hay = p.breadcrumb.toLowerCase();
+      let hits = 0;
+      for (const t of tokens) if (hay.includes(t)) hits++;
+      return { item: p.item, hits };
+    }).filter(s => s.hits > 0).sort((a, b) => b.hits - a.hits);
+    if (!scored.length) return { confident: null, candidates: [] };
+    const best = scored[0];
+    const confident = (scored.length === 1 || best.hits > scored[1].hits) ? best.item : null;
+    return { confident, candidates: scored.slice(0, 5).map(s => s.item) };
+  }
+
+  // Resolve every predecessor named in a create_item op against the
+  // current draft. Returns { ok: true, predIds } when all names resolved
+  // cleanly, or { ok: false, reason, unresolved } when at least one was
+  // missing / ambiguous / would create a cycle. The caller is expected to
+  // splice the new row back out of the draft on failure.
+  function aiResolveCreatePredecessors(op, draft, newNode) {
+    const rawPreds = op.parameters.predecessors ?? op.parameters.predecessor;
+    const predNames = aiNormalisePredNames(rawPreds);
+    if (!predNames.length) return { ok: true, predIds: [] };
+
+    const projectId = newNode.id.split('-')[0];
+    const projectNode = draft.find(n => n.id === projectId);
+
+    const predIds = [];
+    const unresolved = [];
+    for (const name of predNames) {
+      const match = aiBestItemMatchLoose(name, draft, projectNode);
+      if (!match.confident) {
+        unresolved.push({ name, candidates: match.candidates || [] });
+        continue;
+      }
+      const pred = match.confident;
+      if (pred.id === newNode.id) {
+        unresolved.push({ name, reason: 'A new item cannot depend on itself.', candidates: [] });
+        continue;
+      }
+      if (aiPredCreatesCycle(draft, newNode.id, pred.id)) {
+        unresolved.push({
+          name,
+          reason: `Adding ${pred.name} would create a circular dependency.`,
+          candidates: [],
+        });
+        continue;
+      }
+      if (!predIds.includes(pred.id)) predIds.push(pred.id);
+    }
+    if (unresolved.length) {
+      const lines = unresolved.map(u => {
+        if (u.reason) return `"${u.name}" — ${u.reason}`;
+        if (u.candidates && u.candidates.length) {
+          return `"${u.name}" matched multiple/uncertain tasks: ` +
+            u.candidates.map(c => `${c.id} ${c.name}`).join(', ');
+        }
+        return `"${u.name}" was not found`;
+      });
+      return {
+        ok: false,
+        reason: `Could not resolve predecessor${unresolved.length === 1 ? '' : 's'}:\n${lines.join('\n')}`,
+        unresolved,
+      };
+    }
+    return { ok: true, predIds };
+  }
+
+  // add_dependency — append a predecessor to the target task's predecessors list.
+  function aiApplyAddDependency(op, draft) {
+    const res = aiResolveTarget(op.target, draft);
+    if (!res.ok) return { ok: false, reason: res.reason, candidates: res.candidates, kind: res.kind };
+    const target = draft.find(n => n.id === res.id);
+    if (!target) return { ok: false, reason: 'Target not found.' };
+
+    let pred;
+    // Honour an explicit predecessor pin set by the structured op editor
+    // (the dropdown picks an existing node id outright).
+    if (op.parameters._pinnedPredId) {
+      pred = draft.find(n => n.id === op.parameters._pinnedPredId);
+      if (!pred) return { ok: false, reason: `Pinned predecessor ${op.parameters._pinnedPredId} no longer exists.` };
+    } else {
+      const predName = op.parameters.predecessor;
+      if (!predName || predName === 'N/A') {
+        return { ok: false, reason: 'No predecessor specified — say which task should come before it.' };
+      }
+      // Resolve predecessor within the same project (most natural scope).
+      const projectId = target.id.split('-')[0];
+      const projectNode = draft.find(n => n.id === projectId);
+      const pm = aiMatchItem(predName, draft, projectNode, null);
+      if (!pm.confident && pm.candidates.length) {
+        return { ok: false,
+                 reason: `Which "${predName}" should be the predecessor of ${target.name}?`,
+                 kind: 'item', candidates: pm.candidates };
+      }
+      if (!pm.confident) {
+        return { ok: false, reason: `Predecessor "${predName}" not found in ${projectNode?.name || projectId}.` };
+      }
+      pred = pm.confident;
+    }
+
+    if (pred.id === target.id) {
+      return { ok: false, reason: 'A task cannot depend on itself.' };
+    }
+    const existing = parsePreds(target.predecessors || '');
+    if (existing.includes(pred.id)) {
+      return { ok: false, reason: `${pred.name} is already a predecessor of ${target.name}.` };
+    }
+    if (aiPredCreatesCycle(draft, target.id, pred.id)) {
+      return { ok: false,
+               reason: `Adding ${pred.name} as a predecessor of ${target.name} would create a circular dependency.` };
+    }
+    target.predecessors = existing.length ? `${target.predecessors}, ${pred.id}` : pred.id;
+    return { ok: true, targetId: target.id, predId: pred.id, predName: pred.name };
+  }
+
+  // delete_item — drop the target and every descendant from the draft, and
+  // scrub the deleted ids out of any remaining predecessors list.
+  function aiApplyDelete(op, draft) {
+    const res = aiResolveTarget(op.target, draft);
+    if (!res.ok) return { ok: false, reason: res.reason, candidates: res.candidates, kind: res.kind };
+
+    // Collect the subtree (target + transitive descendants).
+    const toDelete = new Set([res.id]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const n of draft) {
+        const p = parentOf(n.id);
+        if (p && toDelete.has(p) && !toDelete.has(n.id)) {
+          toDelete.add(n.id); grew = true;
+        }
+      }
+    }
+
+    // Remove from draft (back-to-front so indexes stay stable).
+    for (let i = draft.length - 1; i >= 0; i--) {
+      if (toDelete.has(draft[i].id)) draft.splice(i, 1);
+    }
+
+    // Scrub stale predecessor references on the rows that remain.
+    for (const n of draft) {
+      if (!n.predecessors) continue;
+      const preds = parsePreds(n.predecessors).filter(p => !toDelete.has(p));
+      n.predecessors = preds.join(', ');
+    }
+    return { ok: true, targetId: res.id, deletedIds: [...toDelete] };
+  }
+
+  // update_item — generic field updates that aren't covered by the dedicated
+  // operations. Today: rename (new_name), duration (days), budget (est_cost).
+  function aiApplyUpdate(op, draft) {
+    const res = aiResolveTarget(op.target, draft);
+    if (!res.ok) return { ok: false, reason: res.reason, candidates: res.candidates, kind: res.kind };
+    const node = draft.find(n => n.id === res.id);
+    if (!node) return { ok: false, reason: 'Target not found.' };
+
+    const changed = [];
+
+    // Rename — uses parameters.new_name (added to the schema for this op).
+    const newName = op.parameters.new_name;
+    if (newName && newName !== 'N/A' && newName !== node.name) {
+      node.name = String(newName).trim();
+      changed.push(`name → "${node.name}"`);
+    }
+
+    // Duration — adjusts the end date based on start + duration days. Only
+    // meaningful on leaf rows; parents derive from children.
+    if (op.parameters.duration && op.parameters.duration !== 'N/A') {
+      const isLeaf = !draft.some(c => parentOf(c.id) === node.id);
+      if (!isLeaf) {
+        return { ok: false,
+                 reason: 'Duration is only settable on leaf tasks (parents derive from children).' };
+      }
+      const newDur = aiAmountToDays(parseFloat(op.parameters.duration), 'days');
+      if (newDur > 0) {
+        // If actual_start is set, adjust actual_end; otherwise adjust sched_end.
+        const useActual = !!node.actual_start;
+        const startStr  = useActual ? node.actual_start : node.sched_start;
+        if (!startStr) {
+          return { ok: false, reason: 'No start date on this task — set one before changing duration.' };
+        }
+        const newEnd = fmtDate(addDays(new Date(startStr), newDur));
+        if (useActual) node.actual_end = newEnd;
+        else           node.sched_end  = newEnd;
+        changed.push(`duration → ${newDur} day${newDur === 1 ? '' : 's'} (${useActual ? 'actual' : 'sched'})`);
+      }
+    }
+
+    // Budget — accept "$50k", "50000", "100k" etc. Strip non-numeric prefixes.
+    if (op.parameters.budget && op.parameters.budget !== 'N/A') {
+      const raw = String(op.parameters.budget).toLowerCase();
+      const mult = raw.includes('k') ? 1000 : raw.includes('m') ? 1_000_000 : 1;
+      const num  = parseFloat(raw.replace(/[^0-9.]/g, ''));
+      if (Number.isFinite(num)) {
+        node.est_cost = num * mult;
+        changed.push(`budget (est_cost) → ${node.est_cost}`);
+      }
+    }
+
+    if (!changed.length) {
+      return { ok: false, reason: 'Nothing to update — say what you want to change.' };
+    }
+    return { ok: true, targetId: res.id, changes: changed };
+  }
+
+  // ---- create_project_candidate helpers ----
+
+  // Fuzzy-match a template key (A / B / C / D in this build) by project_type.
+  // Returns the key or null. Uses Fuse if available.
+  function aiMatchTemplate(projectType) {
+    if (!projectType || projectType === 'N/A') return null;
+    const keys = Object.keys(TEMPLATES || {});
+    if (!keys.length) return null;
+    const items = keys.map(k => ({ key: k, name: TEMPLATES[k].name || k }));
+    if (typeof Fuse === 'undefined') {
+      const q = projectType.toLowerCase();
+      const hit = items.find(it => it.name.toLowerCase().includes(q));
+      return hit ? hit.key : null;
+    }
+    const fuse = new Fuse(items, {
+      keys: ['name'], includeScore: true,
+      threshold: 0.45, ignoreLocation: true, minMatchCharLength: 2,
+    });
+    const hits = fuse.search(projectType);
+    if (!hits.length) return null;
+    return (hits[0].score ?? 1) < 0.3 ? hits[0].item.key : null;
+  }
+
+  // Build a draft-friendly node array for a template + start date. Mirrors
+  // loadFromTemplate's structure but without any side effects (no pushHistory,
+  // no saveLocal, no NODES mutation). Returns { nodes, pid, projStart, projEnd }.
+  function aiBuildTemplateNodes(templateKey, projectName, startISO, existingIds) {
+    const tpl = TEMPLATES[templateKey];
+    if (!tpl) return null;
+    let result;
+    try { result = solveCPM(tpl.tasks, startISO, true); }
+    catch (e) { console.warn('[AI] template CPM failed:', e); return null; }
+
+    // Next free P# using the union of existing draft + real ids so we never
+    // collide with an existing project after Approve.
+    const allIds = new Set([...(existingIds || []), ...NODES.map(n => n.id)]);
+    let pNum = 1;
+    while (allIds.has('P' + pNum)) pNum++;
+    const pid = `P${pNum}`;
+
+    const phaseMap = {};
+    tpl.tasks.forEach(t => {
+      const phase = t.tid.split('.')[0];
+      (phaseMap[phase] = phaseMap[phase] || []).push(t);
+    });
+    const phaseNames = tpl.phases || {};
+
+    const nodes = [];
+    const projStart = result.dateAt(0);
+    const projEnd   = result.dateAt(result.T);
+    nodes.push({
+      id: pid, type: 'project', name: projectName,
+      owner: '', predecessors: '',
+      sched_start:  fmtDate(projStart), sched_end:  fmtDate(projEnd),
+      // Mirror loadFromTemplate: actuals match sched at load time so the row
+      // renders immediately. The PM can edit actuals from there.
+      actual_start: fmtDate(projStart), actual_end: fmtDate(projEnd),
+      slack: '', percent_done: 0, est_cost: 0, cost_to_date: 0, sale_price: 0,
+      collapsed: false,
+    });
+
+    const sortedPhases = Object.keys(phaseMap).sort((a, b) => parseInt(a) - parseInt(b));
+    const idMap = {};
+    sortedPhases.forEach((phaseNum, pi) => {
+      const taskId = `${pid}-T${pi + 1}`;
+      phaseMap[phaseNum].forEach((t, si) => { idMap[t.tid] = `${taskId}-S${si + 1}`; });
+    });
+    sortedPhases.forEach((phaseNum, pi) => {
+      const tasksInPhase = phaseMap[phaseNum];
+      const taskId = `${pid}-T${pi + 1}`;
+      const phaseStarts = tasksInPhase.map(t => result.dateAt(result.ES[t.tid]));
+      const phaseEnds   = tasksInPhase.map(t => result.dateAt(result.EF[t.tid]));
+      const tStart = new Date(Math.min(...phaseStarts.map(d => +d)));
+      const tEnd   = new Date(Math.max(...phaseEnds.map(d => +d)));
+      const phaseName = phaseNames[phaseNum] || `Phase ${phaseNum}`;
+      nodes.push({
+        id: taskId, type: 'task', name: phaseName,
+        owner: '', predecessors: '',
+        sched_start: fmtDate(tStart), sched_end: fmtDate(tEnd),
+        actual_start: fmtDate(tStart), actual_end: fmtDate(tEnd),
+        slack: '', percent_done: 0, est_cost: 0, cost_to_date: 0, sale_price: 0,
+        collapsed: false,
+      });
+      tasksInPhase.forEach((t, si) => {
+        const subId = idMap[t.tid];
+        const sStart = result.dateAt(result.ES[t.tid]);
+        const sEnd   = result.dateAt(result.EF[t.tid]);
+        const preds = (t.preds || []).map(p => idMap[p]).filter(Boolean).join(', ');
+        nodes.push({
+          id: subId, type: 'subtask', name: t.name,
+          owner: '', predecessors: preds,
+          sched_start: fmtDate(sStart), sched_end: fmtDate(sEnd),
+          actual_start: fmtDate(sStart), actual_end: fmtDate(sEnd),
+          slack: String(result.slack[t.tid] ?? 0),
+          percent_done: 0, est_cost: 0, cost_to_date: 0, sale_price: 0,
+          collapsed: false,
+        });
+      });
+    });
+
+    return { nodes, pid, projStart: fmtDate(projStart), projEnd: fmtDate(projEnd) };
+  }
+
+  // §12 capacity proxy — how many existing project rows have a sched range
+  // that intersects [startISO, endISO]. Used to break ties between candidate
+  // windows: a deadline-clean window that lands on a quieter calendar wins.
+  function aiCountOverlappingProjects(startISO, endISO) {
+    const s = +new Date(startISO);
+    const e = +new Date(endISO);
+    if (!Number.isFinite(s) || !Number.isFinite(e)) return 0;
+    let count = 0;
+    for (const n of NODES) {
+      if (typeFromId(n.id) !== 'project') continue;
+      const ps = +new Date(n.sched_start || n.actual_start || '');
+      const pe = +new Date(n.sched_end   || n.actual_end   || '');
+      if (!Number.isFinite(ps) || !Number.isFinite(pe)) continue;
+      if (pe < s || ps > e) continue;
+      count++;
+    }
+    return count;
+  }
+
+  // Simulate `n` start windows around the preferred date; score each by
+  // whether the resulting project end beats the deadline, then break ties on
+  // calendar load. Returns up to 3 sorted by score desc.
+  function aiSimulateProjectWindows(templateKey, preferredISO, deadlineISO) {
+    const tpl = TEMPLATES[templateKey];
+    if (!tpl) return [];
+    const offsets = [0, 7, 14, 28, 42];
+    const base = new Date(preferredISO);
+    if (isNaN(+base)) return [];
+    const options = [];
+    for (const offset of offsets) {
+      const startStr = fmtDate(addDays(base, offset));
+      try {
+        const r = solveCPM(tpl.tasks, startStr, true);
+        const endStr = fmtDate(r.dateAt(r.T));
+        const conflicts = [];
+        if (deadlineISO) {
+          const ds = new Date(endStr);
+          const dd = new Date(deadlineISO);
+          if (!isNaN(+ds) && !isNaN(+dd) && +ds > +dd) {
+            const days = Math.round((+ds - +dd) / MS_DAY);
+            conflicts.push(`${days} day${days === 1 ? '' : 's'} past deadline ${deadlineISO}`);
+          }
+        }
+        const load = aiCountOverlappingProjects(startStr, endStr);
+        // Score: deadline-clean dominates; closer-to-preferred breaks ties
+        // next; less calendar load breaks any remaining ties.
+        const score = (conflicts.length === 0 ? 1.0 : 0.4)
+                    - offset / 200
+                    - Math.min(load, 4) * 0.05;
+        options.push({ start: startStr, end: endStr, conflicts, score, offset, load });
+      } catch (e) { /* skip broken offset */ }
+    }
+    options.sort((a, b) => b.score - a.score);
+    return options.slice(0, 3);
+  }
+
+  // ---- create_project_candidate orchestration ----
+  // Two-step clarification: pick template, then pick window. Each step stashes
+  // the in-flight op in AI.clarifications and renders clickable buttons.
+  function aiHandleProjectCandidate(op, messageText) {
+    const projectName = (op.target.project && op.target.project !== 'N/A')
+      ? op.target.project
+      : (op.target.item && op.target.item !== 'N/A' ? op.target.item : 'New project');
+
+    if (!op.parameters._pickedTemplate) {
+      const auto = aiMatchTemplate(op.parameters.project_type);
+      if (auto) {
+        op.parameters._pickedTemplate = auto;
+      } else {
+        aiAskTemplateChoice(op, messageText, projectName);
+        return;
+      }
+    }
+    if (!op.parameters._pickedWindow) {
+      aiAskWindowChoice(op, messageText, projectName);
+      return;
+    }
+    aiCommitProjectCandidate(op, messageText, projectName);
+  }
+
+  function aiAskTemplateChoice(op, messageText, projectName) {
+    const stashId = aiNewClarifyId();
+    AI.clarifications[stashId] = { operation: op, sourceText: messageText, kind: 'project_template' };
+    const log = document.getElementById('ai-log');
+    if (!log) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'ai-msg ai-msg-assistant ai-clarify';
+    wrap.dataset.stash = stashId;
+    let html = `<div>Pick a template for "${aiEscapeHtml(projectName)}":</div><div class="ai-cand-row">`;
+    for (const k of Object.keys(TEMPLATES || {})) {
+      const t = TEMPLATES[k];
+      const n = (t.tasks || []).length;
+      html += `<button class="ai-cand-btn" onclick="aiOnTemplatePick('${stashId}','${aiEscapeAttr(k)}')">${aiEscapeHtml(t.name || k)} <span class="ai-cand-id">${aiEscapeHtml(k)} · ${n} task${n === 1 ? '' : 's'}</span></button>`;
+    }
+    html += `<button class="ai-cand-btn ai-cand-cancel" onclick="aiOnCandidateCancel('${stashId}')">Cancel</button></div>`;
+    wrap.innerHTML = html;
+    log.appendChild(wrap);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function aiOnTemplatePick(stashId, templateKey) {
+    const stash = AI.clarifications[stashId];
+    if (!stash) return;
+    stash.operation.parameters._pickedTemplate = templateKey;
+    document.querySelector(`.ai-clarify[data-stash="${stashId}"]`)?.remove();
+    delete AI.clarifications[stashId];
+    aiAppendMessage('user', `→ ${(TEMPLATES[templateKey] || {}).name || templateKey}`);
+    aiHandleProjectCandidate(stash.operation, stash.sourceText);
+  }
+
+  function aiAskWindowChoice(op, messageText, projectName) {
+    const templateKey = op.parameters._pickedTemplate;
+    const tpl = TEMPLATES[templateKey];
+    if (!tpl) {
+      aiAppendMessage('assistant', `✗ Template "${templateKey}" not found.`);
+      return;
+    }
+    const preferred = aiParseDate(op.parameters.preferred_start)
+                   || aiParseDate(op.parameters.date)
+                   || fmtDate(new Date());
+    const deadline = aiParseDate(op.parameters.deadline) || null;
+    const opts = aiSimulateProjectWindows(templateKey, preferred, deadline);
+    if (!opts.length) {
+      aiAppendMessage('assistant', '✗ Could not simulate any windows for this template.');
+      return;
+    }
+    const stashId = aiNewClarifyId();
+    AI.clarifications[stashId] = { operation: op, sourceText: messageText, kind: 'project_window' };
+    const log = document.getElementById('ai-log');
+    if (!log) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'ai-msg ai-msg-assistant ai-clarify';
+    wrap.dataset.stash = stashId;
+    let html = `<div>Pick a start window for ${aiEscapeHtml(projectName)} (${aiEscapeHtml(tpl.name)}):</div><div class="ai-cand-row">`;
+    for (const o of opts) {
+      const loadTag = o.load > 0
+        ? `load: ${o.load} concurrent project${o.load === 1 ? '' : 's'}`
+        : 'load: calendar clear';
+      const tag = o.conflicts.length
+        ? `⚠ ${o.conflicts.join('; ')} · ${loadTag}`
+        : `✓ clean (no deadline issues) · ${loadTag}`;
+      html += `<button class="ai-cand-btn" onclick="aiOnWindowPick('${stashId}','${aiEscapeAttr(o.start)}')">${aiEscapeHtml(o.start)} → ${aiEscapeHtml(o.end)} <span class="ai-cand-id">${aiEscapeHtml(tag)}</span></button>`;
+    }
+    html += `<button class="ai-cand-btn ai-cand-cancel" onclick="aiOnCandidateCancel('${stashId}')">Cancel</button></div>`;
+    wrap.innerHTML = html;
+    log.appendChild(wrap);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function aiOnWindowPick(stashId, startISO) {
+    const stash = AI.clarifications[stashId];
+    if (!stash) return;
+    stash.operation.parameters._pickedWindow = startISO;
+    document.querySelector(`.ai-clarify[data-stash="${stashId}"]`)?.remove();
+    delete AI.clarifications[stashId];
+    aiAppendMessage('user', `→ start ${startISO}`);
+    aiHandleProjectCandidate(stash.operation, stash.sourceText);
+  }
+
+  function aiCommitProjectCandidate(op, messageText, projectName) {
+    if (!AI.draft) {
+      AI.draft = structuredClone(NODES);
+      AI.baseSnapshot = JSON.stringify(NODES);
+    }
+    const templateKey = op.parameters._pickedTemplate;
+    const startISO    = op.parameters._pickedWindow;
+    const existingIds = AI.draft.map(n => n.id);
+    const built = aiBuildTemplateNodes(templateKey, projectName, startISO, existingIds);
+    if (!built) {
+      aiAppendMessage('assistant', '✗ Could not build template into the draft.');
+      return;
+    }
+    for (const n of built.nodes) AI.draft.push(n);
+    AI.pendingChanges.push({
+      id: 'chg_' + (AI.pendingChanges.length + 1),
+      sourceText: messageText,
+      operation: 'create_project_candidate',
+      target: op.target,
+      resolvedTargetId: built.pid,
+      parameters: op.parameters,
+      raw: op,
+    });
+    const tplName = (TEMPLATES[templateKey] || {}).name || templateKey;
+    aiAppendMessage('assistant',
+      `✓ Drafted ${projectName} as ${built.pid} from template "${tplName}" — ${built.nodes.length - 1} task/subtask rows, ${built.projStart} → ${built.projEnd}.`);
+    aiRenderPreview();
+    aiProcessNext();
+  }
+
+  // ---- top-level: submit a user command ----
+  //
+  // The edge function returns { operations: [...] } where the array may have
+  // one entry (simple prompt) or many (compound prompt). Behaviour:
+  //   • single op  → dispatch immediately through the per-op flow below.
+  //   • multi op   → render a batch-confirm UI; only ticked ops are queued.
+  //   • all N/A    → tell the user nothing to do.
+  //
+  // Once queued, operations are processed strictly in order. Each one runs
+  // through the same clarification/commit machinery as a single prompt; the
+  // queue waits for each commit (or cancellation) before pulling the next op.
+  async function aiSubmitChange(messageText) {
+    let resp;
+    try {
+      resp = await window.Supa.invokeChat(
+        AI.chatHistory.slice(),
+        AI.defaultModel,
+        aiBuildBoardContext(),
+      );
+    } catch (e) {
+      aiAppendMessage('assistant', '✗ ' + (e.message || String(e)));
+      return;
+    }
+    // Normalise to an array regardless of whether the LLM returned an envelope
+    // or a single bare op (the edge fn already wraps, but be defensive).
+    let ops = [];
+    if (Array.isArray(resp?.operations)) ops = resp.operations;
+    else if (Array.isArray(resp))        ops = resp;
+    else if (resp && resp.operation)     ops = [resp];
+
+    const usable = ops.filter(o => o && o.operation && o.operation !== 'N/A');
+    if (!usable.length) {
+      const lowConf = ops.length && ops[0].confidence === 'low';
+      aiAppendMessage('assistant', lowConf
+        ? '(Not a project-editing request.)'
+        : 'No recognised operation in that message.');
+      return;
+    }
+
+    if (usable.length === 1) {
+      // Single op — straight through, no batch confirmation needed.
+      AI.opQueue = [];
+      AI.opSourceText = messageText;
+      aiDispatchOp(usable[0], messageText);
+      return;
+    }
+
+    // Multiple ops — show a confirmation UI so the user can drop any that
+    // were misinterpreted before any of them touch the draft.
+    aiAskBatchConfirm(usable, messageText);
+  }
+
+  // Pull the next op off the queue and dispatch it. Called from every
+  // terminal point in the flow (commit, query response, candidate cancel,
+  // batch apply, etc.) so the queue drains on its own.
+  function aiProcessNext() {
+    if (!AI.opQueue || !AI.opQueue.length) return;
+    const op = AI.opQueue.shift();
+    aiDispatchOp(op, AI.opSourceText);
+  }
+
+  // The per-op flow — what aiSubmitChange used to do for a single op. Each
+  // path eventually leads to aiCommitOperation (or a query response), each
+  // of which calls aiProcessNext to keep the queue moving.
+  function aiDispatchOp(op, messageText) {
+    if (!op || op.operation === 'N/A') { aiProcessNext(); return; }
+
+    // create_project_candidate — branch into the template/window picker
+    // before any normal resolve/commit flow runs. This op has its own UI.
+    if (op.operation === 'create_project_candidate') {
+      aiHandleProjectCandidate(op, messageText);
+      return;
+    }
+
+    // Read-only: query_schedule never opens a draft. Resolve target then
+    // answer in chat. Ambiguous matches still get the clarification flow.
+    if (op.operation === 'query_schedule') {
+      const r = aiApplyQuery(op, AI.draft || NODES);
+      if (!r.ok && r.candidates && r.candidates.length) {
+        aiAskClarification(op, r.candidates, r.kind, r.reason, messageText);
+        return;
+      }
+      if (!r.ok) {
+        aiAppendMessage('assistant', '✗ ' + (r.reason || 'Could not find that.'));
+        aiProcessNext();
+        return;
+      }
+      aiAppendMessage('assistant', r.text);
+      aiProcessNext();
+      return;
+    }
+
+    // shift_item: two clarification steps in order — sched-vs-actual, then
+    // delay-vs-extend.
+    if (op.operation === 'shift_item' &&
+        (!op.parameters._fieldChoice || !op.parameters._modeChoice)) {
+      const resolve = aiResolveTarget(op.target, AI.draft || NODES);
+      if (!resolve.ok && resolve.candidates && resolve.candidates.length) {
+        aiAskClarification(op, resolve.candidates, resolve.kind, resolve.reason, messageText);
+        return;
+      }
+      if (!resolve.ok) {
+        aiAppendMessage('assistant', '✗ ' + (resolve.reason || 'Could not find that.'));
+        aiProcessNext();
+        return;
+      }
+      aiContinueShift(op, messageText);
+      return;
+    }
+
+    // create_item targeting a task/subtask: pre-resolve the containing project.
+    if (op.operation === 'create_item') {
+      if (op.target.item_type !== 'project') {
+        // Editor-driven path: parent is already pinned (to a task for
+        // subtasks, or to a project for tasks). Trust it.
+        if (!op.target._pinnedParentId) {
+          if (!op.target.project || op.target.project === 'N/A') {
+            aiAppendMessage('assistant', '✗ Which project should I add this to? Please re-ask with a project name.');
+            aiProcessNext();
+            return;
+          }
+          const pm = aiMatchProject(op.target.project, AI.draft || NODES);
+          if (!pm.confident && pm.candidates.length) {
+            aiAskClarification(op, pm.candidates, 'project',
+              `Which project should I add "${op.target.item || 'this item'}" to?`,
+              messageText);
+            return;
+          }
+          if (!pm.confident) {
+            aiAppendMessage('assistant', `✗ Project "${op.target.project}" not found.`);
+            aiProcessNext();
+            return;
+          }
+          // Pin the project ONLY for task-level creates. For subtasks we
+          // leave _pinnedParentId unset so aiApplyCreate can route the row
+          // under the matching task (via op.target.parent or single-task
+          // fallback). Pinning the project here would force the row to be
+          // created at task level — that's the bug the user reported.
+          if (op.target.item_type !== 'subtask') {
+            op.target._pinnedParentId = pm.confident.id;
+          } else {
+            // Normalise the project name so aiApplyCreate hits the same row.
+            op.target.project = pm.confident.name || op.target.project;
+          }
+        }
+      }
+    } else {
+      const resolve = aiResolveTarget(op.target, AI.draft || NODES);
+      if (!resolve.ok && resolve.candidates && resolve.candidates.length) {
+        aiAskClarification(op, resolve.candidates, resolve.kind, resolve.reason, messageText);
+        return;
+      }
+      if (!resolve.ok) {
+        aiAppendMessage('assistant', '✗ ' + (resolve.reason || 'Could not find that.'));
+        aiProcessNext();
+        return;
+      }
+    }
+    aiCommitOperation(op, messageText);
+  }
+
+  // --- structured op editor for compound prompts ---
+  // For each parsed op the editor renders a card with dropdowns/inputs so
+  // the user can fix anything the LLM got wrong (op type, target project,
+  // parent task, predecessor item, owner …) before applying. Each card has
+  // a Skip toggle; only un-skipped ops dispatch. Replaces the old checkbox
+  // multi-op confirm.
+  function aiAskBatchConfirm(ops, messageText) {
+    const stashId = aiNewClarifyId();
+    // Deep-copy ops so edits are scoped to this clarification and don't
+    // leak back into AI.opQueue / the original LLM payload.
+    const opsCopy = ops.map(o => JSON.parse(JSON.stringify(o)));
+    // Pre-populate skip flag: low-confidence ops start skipped.
+    for (const o of opsCopy) {
+      o._skip = o.confidence === 'low';
+      // Make sure parameters exists so the editor can read/write freely.
+      o.parameters = o.parameters || {};
+      o.target = o.target || {};
+    }
+    AI.clarifications[stashId] = {
+      kind: 'batch_confirm', ops: opsCopy, sourceText: messageText,
+    };
+    aiRenderBatchEditor(stashId);
+  }
+
+  // Render (or re-render) the editor block for a stashed batch. Re-renders
+  // on every field change so dependent dropdowns (parent/item/predecessor)
+  // refresh when the project changes.
+  function aiRenderBatchEditor(stashId) {
+    const stash = AI.clarifications[stashId];
+    if (!stash) return;
+    const log = document.getElementById('ai-log');
+    if (!log) return;
+    let wrap = document.querySelector(`.ai-clarify[data-stash="${stashId}"]`);
+    if (!wrap) {
+      wrap = document.createElement('div');
+      wrap.className = 'ai-msg ai-msg-assistant ai-clarify ai-batch-edit';
+      wrap.dataset.stash = stashId;
+      log.appendChild(wrap);
+    }
+    const n = stash.ops.length;
+    let html = `<div class="ai-batch-edit-head">I parsed ${n} operation${n === 1 ? '' : 's'}. Review and edit each one, then apply:</div>`;
+    stash.ops.forEach((op, i) => { html += aiRenderBatchCard(stashId, op, i); });
+    html += `<div class="ai-cand-row" style="margin-top:8px;">
+      <button class="ai-cand-btn" onclick="aiOnBatchApply('${stashId}')">Apply all</button>
+      <button class="ai-cand-btn ai-cand-cancel" onclick="aiOnBatchCancel('${stashId}')">Cancel all</button>
+    </div>`;
+    wrap.innerHTML = html;
+    log.scrollTop = log.scrollHeight;
+  }
+
+  // Render the editable card for one op. Operation-type dropdown sits at
+  // the top; the body below is rendered per op type.
+  function aiRenderBatchCard(stashId, op, idx) {
+    const OPS = [
+      ['create_item',                'Create task / subtask / project'],
+      ['add_dependency',             'Add dependency (predecessor)'],
+      ['assign_owner',               'Assign owner'],
+      ['shift_item',                 'Shift dates (delay / earlier)'],
+      ['update_progress',            'Update progress / status'],
+      ['delete_item',                'Delete item'],
+      ['update_item',                'Update field (rename / duration / budget)'],
+      ['query_schedule',             'Ask about an item (read-only)'],
+      ['create_project_candidate',   'New project candidate'],
+    ];
+    const opSelect = aiSelect('operation', idx, stashId, OPS, op.operation);
+    const skipChecked = op._skip ? 'checked' : '';
+    let body = '';
+    switch (op.operation) {
+      case 'create_item':              body = aiRenderCardCreateItem(stashId, op, idx); break;
+      case 'add_dependency':           body = aiRenderCardAddDep(stashId, op, idx);     break;
+      case 'assign_owner':             body = aiRenderCardAssignOwner(stashId, op, idx); break;
+      case 'shift_item':               body = aiRenderCardShift(stashId, op, idx);      break;
+      case 'update_progress':          body = aiRenderCardProgress(stashId, op, idx);   break;
+      case 'delete_item':              body = aiRenderCardDelete(stashId, op, idx);     break;
+      case 'update_item':              body = aiRenderCardUpdate(stashId, op, idx);     break;
+      case 'query_schedule':           body = aiRenderCardQuery(stashId, op, idx);      break;
+      case 'create_project_candidate': body = aiRenderCardCandidate(stashId, op, idx);  break;
+      default:                         body = `<div style="color:#6b7280;">(${aiEscapeHtml(op.operation)})</div>`;
+    }
+    return `<div class="ai-batch-card${op._skip ? ' skipped' : ''}">
+      <div class="ai-batch-card-head">
+        <span class="ai-batch-card-num">#${idx + 1}</span>
+        ${opSelect}
+        <label class="ai-batch-skip"><input type="checkbox" ${skipChecked} onchange="aiOnBatchToggleSkip('${stashId}',${idx},this.checked)"> skip</label>
+      </div>
+      ${body}
+    </div>`;
+  }
+
+  // Helpers — small DOM-string builders.
+  function aiSelect(field, idx, stashId, options, current, opts) {
+    const id = `${stashId}-${idx}-${field}`;
+    const onchange = `aiOnBatchEdit('${stashId}',${idx},'${field}',this.value)`;
+    const placeholder = (opts && opts.placeholder) ? `<option value="">${aiEscapeHtml(opts.placeholder)}</option>` : '';
+    const opts2 = options.map(([v, lbl]) => {
+      const sel = String(v) === String(current || '') ? ' selected' : '';
+      return `<option value="${aiEscapeAttr(v)}"${sel}>${aiEscapeHtml(lbl)}</option>`;
+    }).join('');
+    return `<select id="${id}" onchange="${onchange}">${placeholder}${opts2}</select>`;
+  }
+  function aiTextInput(field, idx, stashId, current, placeholder) {
+    const ph = placeholder ? ` placeholder="${aiEscapeAttr(placeholder)}"` : '';
+    return `<input type="text" value="${aiEscapeAttr(current || '')}"${ph} oninput="aiOnBatchEdit('${stashId}',${idx},'${field}',this.value)">`;
+  }
+  function aiRow(label, control) {
+    return `<div class="ai-batch-row"><label>${aiEscapeHtml(label)}</label>${control}</div>`;
+  }
+  // Build option arrays from the DRAFT (so cascading creates show up)
+  // when one exists, otherwise from real NODES.
+  function aiBatchNodes() { return AI.draft || NODES; }
+  function aiProjectOptions() {
+    return aiBatchNodes()
+      .filter(n => typeFromId(n.id) === 'project')
+      .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
+      .map(n => [n.id, `${n.id} — ${n.name || '(unnamed)'}`]);
+  }
+  function aiTasksInProject(projectId) {
+    if (!projectId) return [];
+    return aiBatchNodes()
+      .filter(n => parentOf(n.id) === projectId)
+      .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
+      .map(n => [n.id, `${n.id} — ${n.name || '(unnamed)'}`]);
+  }
+  function aiItemsInProject(projectId) {
+    if (!projectId) return [];
+    return aiBatchNodes()
+      .filter(n => n.id !== projectId && n.id.split('-')[0] === projectId)
+      .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
+      .map(n => [n.id, `${n.id} — ${n.name || '(unnamed)'} (${typeFromId(n.id)})`]);
+  }
+  function aiOwnerOptions() {
+    const set = new Set();
+    for (const n of aiBatchNodes()) { const o = (n.owner || '').trim(); if (o) set.add(o); }
+    return [...set].sort().map(o => [o, o]);
+  }
+  // Resolve a project id from the op state. Prefers a pinned id, then a
+  // pre-existing match against target.project, then the first project.
+  function aiResolveBatchProject(op) {
+    if (op.target._pinnedProjectId) return op.target._pinnedProjectId;
+    const projects = aiBatchNodes().filter(n => typeFromId(n.id) === 'project');
+    if (!projects.length) return '';
+    if (op.target.project && op.target.project !== 'N/A') {
+      const pm = aiMatchProject(op.target.project, aiBatchNodes(), { ignoreScope: true });
+      if (pm.confident) return pm.confident.id;
+      if (pm.candidates.length) return pm.candidates[0].id;
+    }
+    return projects[0].id;
+  }
+  // Resolve an item id (task/subtask) from op state, scoped to a project.
+  function aiResolveBatchItem(op, projectId) {
+    if (op.target._pinnedId) return op.target._pinnedId;
+    const project = aiBatchNodes().find(n => n.id === projectId);
+    if (op.target.item && op.target.item !== 'N/A' && project) {
+      const im = aiMatchItem(op.target.item, aiBatchNodes(), project, op.target.item_type, { ignoreScope: true });
+      if (im.confident) return im.confident.id;
+      if (im.candidates.length) return im.candidates[0].id;
+    }
+    return '';
+  }
+
+  // --- per-op card bodies ---
+  function aiRenderCardCreateItem(stashId, op, idx) {
+    const TYPES = [['project','project'],['task','task'],['subtask','subtask']];
+    const type = op.target.item_type === 'project' || op.target.item_type === 'task' || op.target.item_type === 'subtask'
+      ? op.target.item_type : 'task';
+    const rows = [aiRow('Type', aiSelect('item_type', idx, stashId, TYPES, type))];
+    if (type !== 'project') {
+      const projId = aiResolveBatchProject(op);
+      op.target._pinnedProjectId = projId; // cache for subsequent fields
+      rows.push(aiRow('Project', aiSelect('project', idx, stashId, aiProjectOptions(), projId)));
+      if (type === 'subtask') {
+        const tasks = aiTasksInProject(projId).filter(([id]) => typeFromId(id) === 'task');
+        const parentId = op.target._pinnedParentId
+          || (op.target.parent && op.target.parent !== 'N/A'
+              ? (tasks.find(([id, lbl]) => lbl.toLowerCase().includes(String(op.target.parent).toLowerCase())) || [])[0]
+              : '')
+          || (tasks[0] && tasks[0][0]) || '';
+        op.target._pinnedParentId = parentId;
+        rows.push(aiRow('Under task', aiSelect('parent', idx, stashId, tasks, parentId)));
+      }
+    }
+    rows.push(aiRow('Name', aiTextInput('item', idx, stashId, op.target.item, `new ${type} name`)));
+    const ownerOpts = aiOwnerOptions();
+    const ownerCurrent = (op.parameters.owner && op.parameters.owner !== 'N/A') ? op.parameters.owner : '';
+    rows.push(aiRow('Owner', aiSelect('owner', idx, stashId,
+      [['', '(none)'], ...ownerOpts, ['__new__', '＋ new owner…']], ownerCurrent)));
+    if (op.parameters.owner === '__new__' || op.parameters._ownerNewMode) {
+      rows.push(aiRow('New owner', aiTextInput('ownerNew', idx, stashId, op.parameters._ownerNew, 'e.g. Jane Doe')));
+    }
+    // Predecessors as a single comma/and-separated string. aiNormalisePredNames
+    // splits this back into an array at apply time. Editing this field updates
+    // parameters.predecessors (the array form) so cascading creates work.
+    const predList = Array.isArray(op.parameters.predecessors)
+      ? op.parameters.predecessors.join(', ')
+      : (op.parameters.predecessor && op.parameters.predecessor !== 'N/A'
+          ? op.parameters.predecessor
+          : '');
+    rows.push(aiRow('Predecessors',
+      aiTextInput('predecessors', idx, stashId, predList,
+        type === 'project' ? 'usually none for projects' : 'e.g. solar, inverter install')));
+    return rows.join('');
+  }
+
+  function aiRenderCardAddDep(stashId, op, idx) {
+    const projId = aiResolveBatchProject(op);
+    op.target._pinnedProjectId = projId;
+    const itemId = aiResolveBatchItem(op, projId);
+    op.target._pinnedId = itemId;
+    const items = aiItemsInProject(projId);
+    const preds = items.filter(([id]) => id !== itemId);
+    const predId = op.parameters._pinnedPredId
+      || (op.parameters.predecessor && op.parameters.predecessor !== 'N/A'
+          ? (preds.find(([id, lbl]) => lbl.toLowerCase().includes(String(op.parameters.predecessor).toLowerCase())) || [])[0]
+          : '')
+      || '';
+    op.parameters._pinnedPredId = predId;
+    return [
+      aiRow('Project',     aiSelect('project', idx, stashId, aiProjectOptions(), projId)),
+      aiRow('Item',        aiSelect('item',    idx, stashId, items, itemId)),
+      aiRow('Predecessor', aiSelect('predecessor', idx, stashId, preds, predId)),
+    ].join('');
+  }
+
+  function aiRenderCardAssignOwner(stashId, op, idx) {
+    const projId = aiResolveBatchProject(op);
+    op.target._pinnedProjectId = projId;
+    const itemId = aiResolveBatchItem(op, projId);
+    op.target._pinnedId = itemId;
+    const ownerOpts = aiOwnerOptions();
+    const ownerCurrent = (op.parameters.owner && op.parameters.owner !== 'N/A')
+      ? (ownerOpts.find(([n]) => n.toLowerCase() === String(op.parameters.owner).toLowerCase())?.[0]
+         || op.parameters.owner)
+      : '';
+    return [
+      aiRow('Project', aiSelect('project', idx, stashId, aiProjectOptions(), projId)),
+      aiRow('Item',    aiSelect('item',    idx, stashId, aiItemsInProject(projId), itemId)),
+      aiRow('Owner',   aiSelect('owner',   idx, stashId,
+        [['', '(none)'], ...ownerOpts, ['__new__', '＋ new owner…']], ownerCurrent)),
+      (op.parameters.owner === '__new__'
+        ? aiRow('New owner', aiTextInput('ownerNew', idx, stashId, op.parameters._ownerNew, 'e.g. Jane Doe'))
+        : ''),
+    ].join('');
+  }
+
+  function aiRenderCardShift(stashId, op, idx) {
+    const projId = aiResolveBatchProject(op);
+    op.target._pinnedProjectId = projId;
+    const itemId = aiResolveBatchItem(op, projId);
+    op.target._pinnedId = itemId;
+    return [
+      aiRow('Project',   aiSelect('project',   idx, stashId, aiProjectOptions(), projId)),
+      aiRow('Item',      aiSelect('item',      idx, stashId, aiItemsInProject(projId), itemId)),
+      aiRow('Direction', aiSelect('direction', idx, stashId, [['later','later'],['earlier','earlier']], op.parameters.direction || 'later')),
+      aiRow('Amount',    aiTextInput('amount', idx, stashId, op.parameters.amount, 'e.g. 2')),
+      aiRow('Unit',      aiSelect('unit',      idx, stashId, [['days','days'],['weeks','weeks'],['months','months']], op.parameters.unit || 'days')),
+    ].join('');
+  }
+
+  function aiRenderCardProgress(stashId, op, idx) {
+    const projId = aiResolveBatchProject(op);
+    op.target._pinnedProjectId = projId;
+    const itemId = aiResolveBatchItem(op, projId);
+    op.target._pinnedId = itemId;
+    return [
+      aiRow('Project', aiSelect('project', idx, stashId, aiProjectOptions(), projId)),
+      aiRow('Item',    aiSelect('item',    idx, stashId, aiItemsInProject(projId), itemId)),
+      aiRow('% done',  aiTextInput('percent_done', idx, stashId, op.parameters.percent_done, '0–100')),
+    ].join('');
+  }
+
+  function aiRenderCardDelete(stashId, op, idx) {
+    const projId = aiResolveBatchProject(op);
+    op.target._pinnedProjectId = projId;
+    const itemId = aiResolveBatchItem(op, projId);
+    op.target._pinnedId = itemId;
+    return [
+      aiRow('Project', aiSelect('project', idx, stashId, aiProjectOptions(), projId)),
+      aiRow('Item',    aiSelect('item',    idx, stashId, [[projId, `${projId} (entire project)`], ...aiItemsInProject(projId)], itemId || projId)),
+    ].join('');
+  }
+
+  function aiRenderCardUpdate(stashId, op, idx) {
+    const projId = aiResolveBatchProject(op);
+    op.target._pinnedProjectId = projId;
+    const itemId = aiResolveBatchItem(op, projId);
+    op.target._pinnedId = itemId;
+    return [
+      aiRow('Project',  aiSelect('project',  idx, stashId, aiProjectOptions(), projId)),
+      aiRow('Item',     aiSelect('item',     idx, stashId, aiItemsInProject(projId), itemId)),
+      aiRow('New name', aiTextInput('new_name', idx, stashId, op.parameters.new_name)),
+      aiRow('Duration', aiTextInput('duration', idx, stashId, op.parameters.duration, 'days')),
+      aiRow('Budget',   aiTextInput('budget',   idx, stashId, op.parameters.budget, 'e.g. $50k')),
+    ].join('');
+  }
+
+  function aiRenderCardQuery(stashId, op, idx) {
+    const projId = aiResolveBatchProject(op);
+    op.target._pinnedProjectId = projId;
+    const itemId = aiResolveBatchItem(op, projId);
+    op.target._pinnedId = itemId;
+    return [
+      aiRow('Project', aiSelect('project', idx, stashId, aiProjectOptions(), projId)),
+      aiRow('Item',    aiSelect('item',    idx, stashId, aiItemsInProject(projId), itemId)),
+    ].join('');
+  }
+
+  function aiRenderCardCandidate(stashId, op, idx) {
+    // The candidate flow has its own template/window pickers — the editor
+    // here just lets the user fix the surface fields. Other params route
+    // through aiHandleProjectCandidate when applied.
+    return [
+      aiRow('Name',       aiTextInput('candName',      idx, stashId, op.target.project, 'project name')),
+      aiRow('Type',       aiTextInput('project_type',  idx, stashId, op.parameters.project_type, 'e.g. solar, BESS')),
+      aiRow('Pref start', aiTextInput('preferred_start', idx, stashId, op.parameters.preferred_start)),
+      aiRow('Deadline',   aiTextInput('deadline',      idx, stashId, op.parameters.deadline)),
+    ].join('');
+  }
+
+  // Mutate the stashed op when a field changes. Re-renders ONLY for
+  // structural changes (op type, item_type, project, owner mode) where
+  // dependent controls need to refresh. Text-input edits update state in
+  // place — re-rendering on every keystroke destroys the <input> and
+  // kills focus, leaving the user able to type only one character at a
+  // time.
+  function aiOnBatchEdit(stashId, idx, field, value) {
+    const stash = AI.clarifications[stashId];
+    if (!stash) return;
+    const op = stash.ops[idx];
+    if (!op) return;
+    let needRerender = false;
+    switch (field) {
+      case 'operation':
+        op.operation = value;
+        // Clear pinned ids so the new op type re-resolves on next render.
+        op.target._pinnedId = undefined;
+        op.target._pinnedParentId = undefined;
+        op.target._pinnedProjectId = undefined;
+        op.parameters._pinnedPredId = undefined;
+        needRerender = true;
+        break;
+      case 'item_type':
+        op.target.item_type = value;
+        op.target._pinnedParentId = undefined;
+        needRerender = true;
+        break;
+      case 'project':
+        op.target._pinnedProjectId = value;
+        // Project changed → item / parent / predecessor references stale.
+        op.target._pinnedId = undefined;
+        op.target._pinnedParentId = undefined;
+        op.parameters._pinnedPredId = undefined;
+        {
+          const p = aiBatchNodes().find(n => n.id === value);
+          if (p) op.target.project = p.name || value;
+        }
+        needRerender = true;
+        break;
+      case 'parent':
+        op.target._pinnedParentId = value;
+        break;
+      case 'item':
+        if (op.operation !== 'create_item') {
+          op.target._pinnedId = value;
+          const n = aiBatchNodes().find(x => x.id === value);
+          if (n) op.target.item = n.name || value;
+        } else {
+          // create_item — "Name" field is a free text input.
+          op.target.item = value;
+        }
+        break;
+      case 'predecessor':
+        op.parameters._pinnedPredId = value;
+        {
+          const n = aiBatchNodes().find(x => x.id === value);
+          if (n) op.parameters.predecessor = n.name || value;
+        }
+        break;
+      case 'predecessors':
+        op.parameters.predecessors = aiNormalisePredNames(value);
+        if (op.operation !== 'create_item') {
+          op.parameters.predecessor = op.parameters.predecessors[0] || 'N/A';
+        }
+        break;
+      case 'owner':
+        op.parameters.owner = value;
+        op.parameters._ownerResolved = !!value && value !== '__new__';
+        op.parameters._ownerNewMode  = value === '__new__';
+        if (!op.parameters._ownerNewMode) op.parameters._ownerNew = '';
+        // Re-render so the "New owner" row appears/disappears.
+        needRerender = true;
+        break;
+      case 'ownerNew':
+        op.parameters._ownerNew = value;
+        op.parameters.owner = value;
+        op.parameters._ownerResolved = false;
+        break;
+      case 'candName':
+        op.target.project = value;
+        break;
+      default:
+        op.parameters[field] = value;
+    }
+    if (needRerender) aiRenderBatchEditor(stashId);
+  }
+
+  function aiOnBatchToggleSkip(stashId, idx, skipped) {
+    const stash = AI.clarifications[stashId];
+    if (!stash) return;
+    const op = stash.ops[idx];
+    if (!op) return;
+    op._skip = !!skipped;
+    aiRenderBatchEditor(stashId);
+  }
+
+  function aiOnBatchApply(stashId) {
+    const stash = AI.clarifications[stashId];
+    if (!stash) return;
+    const wrapEl = document.querySelector(`.ai-clarify[data-stash="${stashId}"]`);
+    if (wrapEl) wrapEl.remove();
+    delete AI.clarifications[stashId];
+    const picked = stash.ops.filter(o => !o._skip);
+    if (!picked.length) {
+      aiAppendMessage('assistant', 'No operations selected.');
+      return;
+    }
+    aiAppendMessage('user', `→ apply ${picked.length} of ${stash.ops.length}`);
+    AI.opQueue = picked.slice(1);
+    AI.opSourceText = stash.sourceText;
+    aiDispatchOp(picked[0], stash.sourceText);
+  }
+
+  function aiOnBatchCancel(stashId) {
+    const stash = AI.clarifications[stashId];
+    if (!stash) return;
+    document.querySelector(`.ai-clarify[data-stash="${stashId}"]`)?.remove();
+    delete AI.clarifications[stashId];
+    AI.opQueue = [];
+    aiAppendMessage('assistant', 'Cancelled — nothing queued.');
+  }
+
+  // Re-apply every pending change on top of the latest NODES state. Used as
+  // a "merge resolution" when a remote realtime update changes the underlying
+  // board while we have an AI draft open. Mutates AI.draft / AI.baseSnapshot.
+  // Returns { ok, failures } — failures is the list of pending changes that
+  // can no longer apply (their target was deleted, etc.).
+  function aiReplayPendingChanges() {
+    if (!AI.draft) return { ok: true, failures: [] };
+    AI.baseSnapshot = JSON.stringify(NODES);
+    AI.draft = structuredClone(NODES);
+    const failures = [];
+    for (const change of AI.pendingChanges) {
+      const op = change.raw;
+      if (!op) { failures.push({ change, reason: 'No saved operation to replay.' }); continue; }
+      const result = aiApplyOperation(op, AI.draft);
+      if (!result.ok) {
+        failures.push({ change, reason: result.reason || 'apply failed' });
+        continue;
+      }
+      // Match aiCommitOperation's CPM behaviour exactly so the replayed state
+      // is identical to the originally-committed state (modulo the new server
+      // rows merged in by realtime).
+      const skipCpm = op.operation === 'shift_item' && result.fieldChoice === 'scheduled';
+      if (!skipCpm && op.reasoning && op.reasoning.requires_schedule_computation && result.targetId) {
+        const projId = result.targetId.split('-')[0];
+        const hasExplicitDuration = op.operation === 'update_item'
+          && op.parameters.duration && op.parameters.duration !== 'N/A';
+        const preserveExplicit = op.operation === 'shift_item' || hasExplicitDuration;
+        const cpmMode = preserveExplicit ? 'forward' : 'asap';
+        const r = aiRunCPMOnDraft(AI.draft, [projId], cpmMode);
+        AI.draft = r.draft;
+      }
+    }
+    return { ok: failures.length === 0, failures };
+  }
+
+  // Realtime sync entry point — the supabase module calls this after
+  // applyRemoteTaskChange / applyRemotePredChange has merged a remote update
+  // into NODES. We rebuild the AI draft, drop any pending changes that can no
+  // longer apply, and tell the user what happened.
+  function aiOnRemoteSync() {
+    if (!AI.draft || !AI.pendingChanges.length) return;
+    const result = aiReplayPendingChanges();
+    if (result.ok) {
+      aiAppendMessage('assistant', 'ℹ Board updated by another user — your pending changes still apply cleanly.');
+    } else {
+      const failedIds = new Set(result.failures.map(f => f.change.id));
+      AI.pendingChanges = AI.pendingChanges.filter(c => !failedIds.has(c.id));
+      const lines = result.failures.map(f => `• "${f.change.sourceText}" — ${f.reason}`);
+      const n = result.failures.length;
+      aiAppendMessage('assistant',
+        `⚠ Dropped ${n} pending change${n === 1 ? '' : 's'} after a remote update:\n${lines.join('\n')}`);
+    }
+    aiRenderPreview();
+  }
+
+  // Once a target is resolved (confidently or via clarification click), apply
+  // the operation to the draft, run CPM if needed, log it, and refresh preview.
+  function aiCommitOperation(op, messageText) {
+    if (!AI.draft) {
+      AI.draft = structuredClone(NODES);
+      AI.baseSnapshot = JSON.stringify(NODES);
+    }
+    const result = aiApplyOperation(op, AI.draft);
+    if (!result.ok) {
+      let msg = '✗ ' + (result.reason || 'Could not apply');
+      if (result.candidates && result.candidates.length && result.kind) {
+        if (result.kind === 'owner') {
+          aiAskOwnerChoice(op, result.candidates, result.queriedName, result.reason, messageText);
+        } else {
+          aiAskClarification(op, result.candidates, result.kind, result.reason, messageText);
+        }
+        if (AI.pendingChanges.length === 0) {
+          AI.draft = null; AI.baseSnapshot = null;
+        }
+        aiRenderPreview();
+        // The clarification is going to call aiCommitOperation again when
+        // the user picks, which fires aiProcessNext then. Don't advance now.
+        return;
+      }
+      if (AI.pendingChanges.length === 0) {
+        AI.draft = null; AI.baseSnapshot = null;
+      }
+      aiAppendMessage('assistant', msg);
+      aiRenderPreview();
+      // Failure isn't recoverable for this op — move to the next in the queue.
+      aiProcessNext();
+      return;
+    }
+
+    // CPM cascade — runs after every mutating op so the project stays in a
+    // valid (and where possible, optimal) state. Scheduled shifts are
+    // baseline rebaselines on the chosen subtree only, so we skip CPM there.
+    //
+    // Mode picker:
+    //   forward — preserves user-set dates (shift_item, update_item-duration).
+    //   asap    — runs Optimise so the project compresses around the new
+    //             structure (create_item, add_dependency, delete_item,
+    //             update_item rename/budget). This makes the AI always
+    //             deliver an optimally scheduled project after structural ops.
+    const skipCpm = op.operation === 'shift_item' && result.fieldChoice === 'scheduled';
+    if (!skipCpm && op.reasoning && op.reasoning.requires_schedule_computation && result.targetId) {
+      const projId = result.targetId.split('-')[0];
+      const hasExplicitDuration = op.operation === 'update_item'
+        && op.parameters.duration && op.parameters.duration !== 'N/A';
+      const preserveExplicit = op.operation === 'shift_item' || hasExplicitDuration;
+      const cpmMode = preserveExplicit ? 'forward' : 'asap';
+      const r = aiRunCPMOnDraft(AI.draft, [projId], cpmMode);
+      AI.draft = r.draft;
+      if (r.cycles.length) {
+        aiAppendMessage('assistant', '⚠ Predecessor cycle in ' + r.cycles.join(', '));
+      }
+    }
+
+    AI.pendingChanges.push({
+      id: 'chg_' + (AI.pendingChanges.length + 1),
+      sourceText: messageText,
+      operation: op.operation,
+      target: op.target,
+      resolvedTargetId: result.targetId,
+      parameters: op.parameters,
+      raw: op,
+    });
+
+    aiAppendMessage('assistant', aiSummariseChange(op, result));
+    if (op.needs_clarification && op.missing_fields && op.missing_fields.length) {
+      aiAppendMessage('assistant', 'ℹ Missing: ' + op.missing_fields.join(', '));
+    }
+    aiRenderPreview();
+    aiProcessNext();
+  }
+
+  // Stash an operation that needs disambiguation and render clickable buttons
+  // for each candidate. The user clicks one → aiOnCandidatePick re-runs apply.
+  function aiAskClarification(op, candidates, kind, reason, messageText) {
+    const stashId = aiNewClarifyId();
+    AI.clarifications[stashId] = { operation: op, sourceText: messageText, candidates, kind };
+    const log = document.getElementById('ai-log');
+    if (!log) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'ai-msg ai-msg-assistant ai-clarify';
+    wrap.dataset.stash = stashId;
+    let html = `<div>${aiEscapeHtml(reason || 'Did you mean…')}</div><div class="ai-cand-row">`;
+    for (const c of candidates) {
+      const sub = c.id !== c.id.split('-')[0]
+        ? `<span class="ai-cand-id">${aiEscapeHtml(c.id)} · ${typeFromId(c.id)}</span>`
+        : `<span class="ai-cand-id">${aiEscapeHtml(c.id)} · project</span>`;
+      html += `<button class="ai-cand-btn" onclick="aiOnCandidatePick('${stashId}','${aiEscapeAttr(c.id)}')">${aiEscapeHtml(c.name || '(unnamed)')} ${sub}</button>`;
+    }
+    html += `<button class="ai-cand-btn ai-cand-cancel" onclick="aiOnCandidateCancel('${stashId}')">Cancel</button>`;
+    html += `</div>`;
+    wrap.innerHTML = html;
+    log.appendChild(wrap);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  // Owner-specific clarification — same visual treatment as
+  // aiAskClarification but candidates are profile records, and we offer an
+  // extra "Use … as new" override for cases where the user really meant
+  // to add a freeform owner that doesn't match the team list.
+  function aiAskOwnerChoice(op, candidates, queriedName, reason, messageText) {
+    const stashId = aiNewClarifyId();
+    AI.clarifications[stashId] = {
+      operation: op, sourceText: messageText, candidates, kind: 'owner', queriedName,
+    };
+    const log = document.getElementById('ai-log');
+    if (!log) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'ai-msg ai-msg-assistant ai-clarify';
+    wrap.dataset.stash = stashId;
+    let html = `<div>${aiEscapeHtml(reason || 'Did you mean…')}</div><div class="ai-cand-row">`;
+    for (const c of candidates) {
+      const sub = `<span class="ai-cand-id">owns ${c.count} task${c.count === 1 ? '' : 's'}</span>`;
+      html += `<button class="ai-cand-btn" onclick="aiOnOwnerPick('${stashId}','${aiEscapeAttr(c.name)}')">${aiEscapeHtml(c.name)} ${sub}</button>`;
+    }
+    html += `<button class="ai-cand-btn" onclick="aiOnOwnerUseAsNew('${stashId}')">Add "${aiEscapeHtml(queriedName)}" as a new owner <span class="ai-cand-id">no existing match</span></button>`;
+    html += `<button class="ai-cand-btn ai-cand-cancel" onclick="aiOnCandidateCancel('${stashId}')">Cancel</button>`;
+    html += `</div>`;
+    wrap.innerHTML = html;
+    log.appendChild(wrap);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function aiOnOwnerPick(stashId, ownerName) {
+    const stash = AI.clarifications[stashId];
+    if (!stash) return;
+    const op = stash.operation;
+    op.parameters.owner = ownerName;
+    op.parameters._ownerResolved = true;
+    document.querySelector(`.ai-clarify[data-stash="${stashId}"]`)?.remove();
+    delete AI.clarifications[stashId];
+    aiAppendMessage('user', `→ owner ${ownerName}`);
+    aiDispatchOp(op, stash.sourceText);
+  }
+
+  function aiOnOwnerUseAsNew(stashId) {
+    const stash = AI.clarifications[stashId];
+    if (!stash) return;
+    const op = stash.operation;
+    // Keep op.parameters.owner as the original string the user typed.
+    op.parameters._ownerResolved = true;
+    document.querySelector(`.ai-clarify[data-stash="${stashId}"]`)?.remove();
+    delete AI.clarifications[stashId];
+    aiAppendMessage('user', `→ owner "${stash.queriedName}" (as new)`);
+    aiDispatchOp(op, stash.sourceText);
+  }
+
+  function aiOnCandidatePick(stashId, chosenId) {
+    const stash = AI.clarifications[stashId];
+    if (!stash) return;
+    const chosen = (AI.draft || NODES).find(n => n.id === chosenId);
+    if (!chosen) return;
+
+    const op = stash.operation;
+    // create_item picks always identify a PARENT (project or task) — not the
+    // node we're acting on, which doesn't exist yet.
+    if (op.operation === 'create_item') {
+      op.target._pinnedParentId = chosen.id;
+      op.target.project = (AI.draft || NODES)
+        .find(n => n.id === chosen.id.split('-')[0])?.name || chosen.name;
+    } else if (stash.kind === 'project') {
+      // Resolved which project but still need to match the item within it.
+      op.target.project = chosen.name || chosen.id;
+      // Clear any pinned id from a previous attempt so item resolution re-runs.
+      delete op.target._pinnedId;
+    } else {
+      // Direct hit on the operation target.
+      op.target._pinnedId = chosen.id;
+      op.target.item = chosen.name || chosen.id;
+      op.target.item_type = typeFromId(chosen.id);
+      const proj = (AI.draft || NODES).find(n => n.id === chosen.id.split('-')[0]);
+      if (proj) op.target.project = proj.name || proj.id;
+    }
+
+    // Remove the clarification block from the chat log.
+    document.querySelector(`.ai-clarify[data-stash="${stashId}"]`)?.remove();
+    delete AI.clarifications[stashId];
+    aiAppendMessage('user', `→ ${chosen.name || chosen.id}`);
+    // Re-enter the single dispatcher. aiDispatchOp knows every op type:
+    // query_schedule answers in chat, shift_item walks its field/mode
+    // prompts, create_item respects any pin we just set, etc. Calling
+    // aiCommitOperation directly skipped query_schedule and reported it
+    // as "Unsupported operation".
+    aiDispatchOp(op, stash.sourceText);
+  }
+
+  function aiOnCandidateCancel(stashId) {
+    if (!AI.clarifications[stashId]) return;
+    delete AI.clarifications[stashId];
+    document.querySelector(`.ai-clarify[data-stash="${stashId}"]`)?.remove();
+    // Cancelling means the user dropped this op AND anything queued behind it.
+    const queued = AI.opQueue.length;
+    AI.opQueue = [];
+    aiAppendMessage('assistant', queued
+      ? `Cancelled. Dropped ${queued} queued operation${queued === 1 ? '' : 's'} too.`
+      : 'Cancelled.');
+  }
+
+  // Sched-vs-actual prompt for shift_item. PM-editable actuals are the common
+  // path; rebaselining the schedule is rarer but supported.
+  function aiAskFieldChoice(op, messageText) {
+    const stashId = aiNewClarifyId();
+    AI.clarifications[stashId] = { operation: op, sourceText: messageText, kind: 'field' };
+    const log = document.getElementById('ai-log');
+    if (!log) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'ai-msg ai-msg-assistant ai-clarify';
+    wrap.dataset.stash = stashId;
+    wrap.innerHTML =
+      `<div>Shift which dates?</div>` +
+      `<div class="ai-cand-row">` +
+        `<button class="ai-cand-btn" onclick="aiOnFieldChoice('${stashId}','actual')">` +
+          `⚡ Actual <span class="ai-cand-id">PM-editable, what the AI normally moves</span></button>` +
+        `<button class="ai-cand-btn" onclick="aiOnFieldChoice('${stashId}','scheduled')">` +
+          `🗓 Scheduled <span class="ai-cand-id">baseline — rebaseline this task</span></button>` +
+        `<button class="ai-cand-btn ai-cand-cancel" onclick="aiOnCandidateCancel('${stashId}')">Cancel</button>` +
+      `</div>`;
+    log.appendChild(wrap);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function aiOnFieldChoice(stashId, field) {
+    const stash = AI.clarifications[stashId];
+    if (!stash) return;
+    stash.operation.parameters._fieldChoice = field;
+    document.querySelector(`.ai-clarify[data-stash="${stashId}"]`)?.remove();
+    delete AI.clarifications[stashId];
+    aiAppendMessage('user', `→ ${field === 'scheduled' ? 'scheduled (baseline)' : 'actual'}`);
+    aiContinueShift(stash.operation, stash.sourceText);
+  }
+
+  // Delay vs extend — second clarification step for shift_item. A delay shifts
+  // both dates by Δ (duration unchanged); an extend moves only the end so the
+  // task takes longer (or shorter, if direction=earlier).
+  function aiAskModeChoice(op, messageText) {
+    const stashId = aiNewClarifyId();
+    AI.clarifications[stashId] = { operation: op, sourceText: messageText, kind: 'mode' };
+    const log = document.getElementById('ai-log');
+    if (!log) return;
+    const earlier = op.parameters.direction === 'earlier';
+    const extendVerb     = earlier ? 'Shorten' : 'Extend';
+    const extendVerbHelp = earlier ? 'pulls end in — duration shrinks'
+                                   : 'pushes end out — duration grows';
+    const delayVerb      = earlier ? 'Shift earlier' : 'Delay';
+    const wrap = document.createElement('div');
+    wrap.className = 'ai-msg ai-msg-assistant ai-clarify';
+    wrap.dataset.stash = stashId;
+    wrap.innerHTML =
+      `<div>Move which way?</div>` +
+      `<div class="ai-cand-row">` +
+        `<button class="ai-cand-btn" onclick="aiOnModeChoice('${stashId}','shift')">` +
+          `🔄 ${delayVerb} <span class="ai-cand-id">shift start &amp; end together — duration unchanged</span></button>` +
+        `<button class="ai-cand-btn" onclick="aiOnModeChoice('${stashId}','extend')">` +
+          `⏱ ${extendVerb} <span class="ai-cand-id">${extendVerbHelp}</span></button>` +
+        `<button class="ai-cand-btn ai-cand-cancel" onclick="aiOnCandidateCancel('${stashId}')">Cancel</button>` +
+      `</div>`;
+    log.appendChild(wrap);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function aiOnModeChoice(stashId, mode) {
+    const stash = AI.clarifications[stashId];
+    if (!stash) return;
+    stash.operation.parameters._modeChoice = mode;
+    document.querySelector(`.ai-clarify[data-stash="${stashId}"]`)?.remove();
+    delete AI.clarifications[stashId];
+    aiAppendMessage('user', `→ ${mode === 'extend' ? 'extend / change duration' : 'shift both / keep duration'}`);
+    aiContinueShift(stash.operation, stash.sourceText);
+  }
+
+  // Walk an in-flight shift through any remaining prompts (field, then mode)
+  // and commit once both choices are answered. Called from aiSubmitChange
+  // after the initial target resolve, and from aiOnFieldChoice / aiOnModeChoice.
+  function aiContinueShift(op, messageText) {
+    if (!op.parameters._fieldChoice) { aiAskFieldChoice(op, messageText); return; }
+    if (!op.parameters._modeChoice)  { aiAskModeChoice(op, messageText);  return; }
+    aiCommitOperation(op, messageText);
+  }
+
+  // Escape for use inside an HTML attribute (different rules than text content).
+  function aiEscapeAttr(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;',
+    }[c]));
+  }
+
+  function aiSummariseChange(op, result) {
+    switch (op.operation) {
+      case 'shift_item': {
+        const absD     = Math.abs(result.delta);
+        const earlier  = op.parameters.direction === 'earlier';
+        const verb     = result.modeChoice === 'extend'
+                       ? (earlier ? 'shortened' : 'extended')
+                       : (earlier ? 'shifted earlier' : 'shifted later');
+        const dur      = result.modeChoice === 'extend' ? 'duration changed' : 'duration unchanged';
+        const fieldDesc = result.fieldChoice === 'scheduled'
+          ? 'baseline (sched_*) updated'
+          : 'actual dates updated';
+        const cascade  = result.cascadeCount
+          ? ` (+${result.cascadeCount} downstream task${result.cascadeCount === 1 ? '' : 's'} carried along)`
+          : '';
+        return `✓ ${result.targetId}${cascade} ${verb} by ${absD} day${absD === 1 ? '' : 's'}. ${fieldDesc}; ${dur}.`;
+      }
+      case 'update_progress':
+        return `✓ Set ${result.targetId} percent_done = ${result.percent_done}.`;
+      case 'assign_owner':
+        return `✓ Assigned ${result.targetId} → ${result.owner}.`;
+      case 'create_item':
+        return `✓ Created ${result.created.id} "${result.created.name}" (${result.created.type}) under ${parentOf(result.created.id) || 'root'}.`;
+      case 'add_dependency':
+        return `✓ ${result.targetId} now depends on ${result.predId} (${result.predName}).`;
+      case 'delete_item': {
+        const n = result.deletedIds.length;
+        const extra = n > 1 ? ` (+${n - 1} descendant${n === 2 ? '' : 's'})` : '';
+        return `✓ Deleted ${result.targetId}${extra}.`;
+      }
+      case 'update_item':
+        return `✓ ${result.targetId}: ${(result.changes || []).join(', ')}.`;
+      default:
+        return `✓ Applied ${op.operation}.`;
+    }
+  }
+
+  // ---- diff and preview render ----
+  // Which fields each op writes to on its target. Used by conflict detection.
+  function aiFieldsTouched(change) {
+    const op = change.operation;
+    const p  = change.parameters || {};
+    switch (op) {
+      case 'shift_item':
+        return p._fieldChoice === 'scheduled'
+          ? ['sched_start', 'sched_end']
+          : ['actual_start', 'actual_end'];
+      case 'update_progress': return ['percent_done'];
+      case 'assign_owner':    return ['owner'];
+      case 'add_dependency':  return ['predecessors'];
+      case 'delete_item':     return ['*'];   // wipes target entirely
+      case 'create_item':     return ['*'];   // brand new node
+      case 'update_item': {
+        const f = [];
+        if (p.new_name && p.new_name !== 'N/A') f.push('name');
+        if (p.duration && p.duration !== 'N/A') f.push('sched_end', 'actual_end');
+        if (p.budget   && p.budget   !== 'N/A') f.push('est_cost');
+        return f;
+      }
+      default: return [];
+    }
+  }
+
+  // Build a map of owner-overlap pairs from a node array. Key is
+  // `${owner}|${leafA}|${leafB}` with the ids ordered so the same overlap
+  // hashes identically in baseline and draft. Used by §8.6 to flag NEW
+  // double-bookings introduced by pending changes — overlaps that already
+  // existed before are not re-surfaced.
+  function aiOwnerOverlapPairs(nodes) {
+    const byOwner = new Map();
+    for (const n of nodes) {
+      if (!n.owner) continue;
+      // Owners are only meaningful on leaf rows — parents are roll-ups.
+      const hasChildren = nodes.some(c => parentOf(c.id) === n.id);
+      if (hasChildren) continue;
+      const s = n.actual_start || n.sched_start;
+      const e = n.actual_end   || n.sched_end;
+      if (!s || !e) continue;
+      const sd = +new Date(s), ed = +new Date(e);
+      if (!Number.isFinite(sd) || !Number.isFinite(ed) || sd > ed) continue;
+      const arr = byOwner.get(n.owner) || [];
+      arr.push({ id: n.id, name: n.name || n.id, start: sd, end: ed });
+      byOwner.set(n.owner, arr);
+    }
+    const pairs = new Map();
+    for (const [owner, arr] of byOwner.entries()) {
+      arr.sort((a, b) => a.start - b.start);
+      for (let i = 0; i < arr.length; i++) {
+        for (let j = i + 1; j < arr.length; j++) {
+          if (arr[j].start > arr[i].end) break; // sorted — no further overlaps for i
+          const days = Math.round((Math.min(arr[i].end, arr[j].end) - arr[j].start) / MS_DAY) + 1;
+          if (days <= 0) continue;
+          const [a, b] = arr[i].id < arr[j].id ? [arr[i], arr[j]] : [arr[j], arr[i]];
+          pairs.set(`${owner}|${a.id}|${b.id}`, { owner, a, b, days });
+        }
+      }
+    }
+    return pairs;
+  }
+
+  // Scan pendingChanges + draft for things the user should know about before
+  // hitting Approve. Returns [{ kind, severity, msg }, ...].
+  // Severities: 'warn' (red) for hard issues, 'info' (amber) for FYI overlaps.
+  function aiCollectConflicts() {
+    const warnings = [];
+    const changes = AI.pendingChanges || [];
+
+    // 1. Same target with overlapping fields — later change overrides earlier.
+    if (changes.length >= 2) {
+      const byTarget = new Map();
+      for (const c of changes) {
+        if (!c.resolvedTargetId) continue;
+        const arr = byTarget.get(c.resolvedTargetId) || [];
+        arr.push(c);
+        byTarget.set(c.resolvedTargetId, arr);
+      }
+      for (const [tid, list] of byTarget.entries()) {
+        if (list.length < 2) continue;
+        // Field overlap check
+        const fieldSets = list.map(c => aiFieldsTouched(c));
+        const wildcardSeen = fieldSets.some(s => s.includes('*'));
+        let overlap = wildcardSeen;
+        if (!wildcardSeen) {
+          const counts = {};
+          for (const set of fieldSets) for (const f of set) counts[f] = (counts[f] || 0) + 1;
+          overlap = Object.values(counts).some(n => n > 1);
+        }
+        if (overlap) {
+          const opNames = list.map(c => c.operation).join(' → ');
+          warnings.push({
+            kind: 'same_field',
+            severity: 'info',
+            msg: `${tid} touched by ${list.length} changes (${opNames}). Later changes override earlier ones on overlapping fields.`,
+          });
+        }
+      }
+    }
+
+    // 2. New deadline slips — task whose actual_end now overshoots sched_end
+    //    AND wasn't already overshooting in the baseline snapshot.
+    if (AI.draft && AI.baseSnapshot) {
+      const original = JSON.parse(AI.baseSnapshot);
+      const byId = new Map(original.map(n => [n.id, n]));
+      for (const n of AI.draft) {
+        if (!n.actual_end || !n.sched_end) continue;
+        const ae = new Date(n.actual_end);
+        const se = new Date(n.sched_end);
+        if (isNaN(+ae) || isNaN(+se)) continue;
+        if (+ae <= +se) continue;
+        const orig = byId.get(n.id);
+        const wasSlipping = orig && orig.actual_end && orig.sched_end &&
+                            new Date(orig.actual_end) > new Date(orig.sched_end);
+        if (wasSlipping) continue; // already missed before — not a new conflict
+        const days = Math.round((+ae - +se) / MS_DAY);
+        warnings.push({
+          kind: 'deadline_slip',
+          severity: 'warn',
+          msg: `${n.id} (${n.name || ''}) now finishes ${days} day${days === 1 ? '' : 's'} past its scheduled end (${n.sched_end}).`,
+        });
+      }
+    }
+
+    // 3. §8.6 — owner overlaps NEWLY introduced by pending changes. Same
+    //    owner now booked on two overlapping leaves that weren't overlapping
+    //    in the baseline snapshot.
+    if (AI.draft && AI.baseSnapshot) {
+      const original = JSON.parse(AI.baseSnapshot);
+      const before = aiOwnerOverlapPairs(original);
+      const after  = aiOwnerOverlapPairs(AI.draft);
+      for (const [key, info] of after.entries()) {
+        if (before.has(key)) continue;
+        warnings.push({
+          kind: 'owner_overlap',
+          severity: 'info',
+          msg: `${info.owner} is double-booked: ${info.a.id} (${info.a.name}) overlaps ${info.b.id} (${info.b.name}) for ${info.days} day${info.days === 1 ? '' : 's'}.`,
+        });
+      }
+    }
+
+    return warnings;
+  }
+
+  function aiDiff(originalById, draftArr) {
+    const fields = ['name','owner','sched_start','sched_end','actual_start','actual_end','percent_done','predecessors'];
+    const changed = [];
+    const added = [];
+    const draftIds = new Set();
+    for (const n of draftArr) {
+      draftIds.add(n.id);
+      const o = originalById.get(n.id);
+      if (!o) { added.push(n); continue; }
+      const diffs = [];
+      for (const f of fields) {
+        const ov = o[f] == null ? '' : String(o[f]);
+        const nv = n[f] == null ? '' : String(n[f]);
+        if (ov !== nv) diffs.push({ field: f, from: ov, to: nv });
+      }
+      if (diffs.length) changed.push({ id: n.id, name: n.name, diffs });
+    }
+    const removed = [];
+    for (const o of originalById.values()) if (!draftIds.has(o.id)) removed.push(o);
+    return { changed, added, removed };
+  }
+
+  function aiEscapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;',
+    }[c]));
+  }
+
+  function aiRenderPreview() {
+    const el = document.getElementById('ai-preview');
+    const meta = document.getElementById('ai-meta');
+    if (!el) return;
+    if (!AI.draft) {
+      el.innerHTML = '';
+      if (meta) meta.textContent = 'no pending changes';
+      const actions = document.getElementById('ai-actions');
+      if (actions) actions.style.display = 'none';
+      return;
+    }
+    const original = JSON.parse(AI.baseSnapshot);
+    const byId = new Map(original.map(n => [n.id, n]));
+    const { changed, added, removed } = aiDiff(byId, AI.draft);
+    const warnings = aiCollectConflicts();
+
+    let html = `<div class="ai-preview-head">${AI.pendingChanges.length} change${AI.pendingChanges.length === 1 ? '' : 's'} staged · ${changed.length} modified · ${added.length} added · ${removed.length} removed${warnings.length ? ` · <span class="ai-warn-count">${warnings.length} warning${warnings.length === 1 ? '' : 's'}</span>` : ''}</div>`;
+    if (warnings.length) {
+      html += `<div class="ai-preview-section">⚠ Warnings</div>`;
+      for (const w of warnings) {
+        html += `<div class="ai-warning ai-warn-${w.severity}">${aiEscapeHtml(w.msg)}</div>`;
+      }
+    }
+    if (added.length) {
+      html += `<div class="ai-preview-section">Added</div>`;
+      for (const n of added) {
+        html += `<div class="ai-preview-row">+ <code>${aiEscapeHtml(n.id)}</code> ${aiEscapeHtml(n.name || '')} <span class="ai-muted">(${typeFromId(n.id)})</span><br><span class="ai-muted">sched ${aiEscapeHtml(n.sched_start || '?')} → ${aiEscapeHtml(n.sched_end || '?')}</span></div>`;
+      }
+    }
+    if (changed.length) {
+      html += `<div class="ai-preview-section">Modified</div>`;
+      for (const c of changed) {
+        const lines = c.diffs.map(d =>
+          `<div><span class="ai-muted">${aiEscapeHtml(d.field)}:</span> <span class="ai-old">${aiEscapeHtml(d.from || '(empty)')}</span> → <span class="ai-new">${aiEscapeHtml(d.to || '(empty)')}</span></div>`
+        ).join('');
+        html += `<div class="ai-preview-row"><code>${aiEscapeHtml(c.id)}</code> ${aiEscapeHtml(c.name || '')}${lines}</div>`;
+      }
+    }
+    if (removed.length) {
+      html += `<div class="ai-preview-section">Removed</div>`;
+      for (const n of removed) {
+        html += `<div class="ai-preview-row">− <code>${aiEscapeHtml(n.id)}</code> ${aiEscapeHtml(n.name || '')}</div>`;
+      }
+    }
+    if (!changed.length && !added.length && !removed.length) {
+      html += `<div class="ai-preview-row ai-muted">No effective changes — operation was a no-op.</div>`;
+    }
+    el.innerHTML = html;
+    if (meta) meta.textContent = `${AI.pendingChanges.length} pending · ${changed.length + added.length + removed.length} row${(changed.length + added.length + removed.length) === 1 ? '' : 's'} touched`;
+    document.getElementById('ai-actions').style.display = AI.pendingChanges.length ? '' : 'none';
+  }
+
+  // ---- approve / discard ----
+  function aiApprove() {
+    if (!AI.draft || !AI.pendingChanges.length) {
+      flashHint('Nothing to approve'); return;
+    }
+    // Safety net for §13 — if NODES drifted out from under us between the
+    // last replay and this click (e.g. realtime fired with __aiOnRemoteSync
+    // not yet installed, or a race), replay against the current NODES and
+    // abort if any change can no longer apply. This stops us from clobbering
+    // another user's edits with a draft built on stale assumptions.
+    const currentSnap = JSON.stringify(NODES);
+    if (AI.baseSnapshot !== currentSnap) {
+      const result = aiReplayPendingChanges();
+      if (!result.ok) {
+        const lines = result.failures.map(f => `• "${f.change.sourceText}" — ${f.reason}`);
+        const n = result.failures.length;
+        aiAppendMessage('assistant',
+          `✗ Cannot approve — board changed and ${n} pending change${n === 1 ? '' : 's'} no longer apply${n === 1 ? 's' : ''}:\n${lines.join('\n')}\nRe-state them or Discard.`);
+        // Drop the failing ones from pendingChanges so the user can still
+        // approve the rest if they choose to.
+        const failedIds = new Set(result.failures.map(f => f.change.id));
+        AI.pendingChanges = AI.pendingChanges.filter(c => !failedIds.has(c.id));
+        aiRenderPreview();
+        return;
+      }
+      // Tell the user we re-baselined silently — they probably weren't watching
+      // for a chat banner when they hit Approve.
+      aiAppendMessage('assistant', 'ℹ Re-applied your pending changes on top of a fresh server snapshot before saving.');
+    }
+    pushHistory();
+    const original = JSON.parse(AI.baseSnapshot);
+    const byId = new Map(original.map(n => [n.id, n]));
+    const { changed, added, removed } = aiDiff(byId, AI.draft);
+
+    // Copy modified fields onto real NODES (preserve object identity).
+    const mutFields = ['name','owner','sched_start','sched_end','actual_start','actual_end','percent_done','predecessors','slack','est_cost','cost_to_date','sale_price'];
+    for (const c of changed) {
+      const draftNode = AI.draft.find(n => n.id === c.id);
+      const realNode  = NODES.find(n => n.id === c.id);
+      if (!draftNode || !realNode) continue;
+      for (const f of mutFields) realNode[f] = draftNode[f];
+    }
+    for (const n of added) {
+      NODES.push(structuredClone(n));
+      // Newly-created top-level projects need to land in the user's filter,
+      // otherwise the gantt won't show them. AI created it, the user
+      // implicitly wants to see it.
+      if (typeFromId(n.id) === 'project') selectedProjects.add(n.id);
+    }
+
+    // Removed (from delete_item) — drop locally and tell Supabase to delete.
+    // queueUpsertAll won't issue DELETEs on its own, so do it explicitly.
+    if (removed.length) {
+      const removedIds = new Set(removed.map(n => n.id));
+      for (let i = NODES.length - 1; i >= 0; i--) {
+        if (removedIds.has(NODES[i].id)) NODES.splice(i, 1);
+      }
+      if (window.Supa && window.Supa.deleteRows) {
+        try { window.Supa.deleteRows([...removedIds]); } catch (e) { console.warn('[AI] deleteRows failed', e); }
+      }
+    }
+
+    // Remember which rows this Approve attempted to write so we can match
+    // them against any version-conflict reports that come back from the
+    // upsertAll. Cleared automatically after a short window in the handler.
+    const touchedIds = new Set();
+    for (const c of changed) touchedIds.add(c.id);
+    for (const n of added)   touchedIds.add(n.id);
+    for (const n of removed) touchedIds.add(n.id);
+    AI.pendingApproveIds = {
+      ids: touchedIds,
+      // Snapshot the messages we'd reference if a conflict comes back.
+      sourceTexts: AI.pendingChanges.map(c => c.sourceText),
+      timestamp: Date.now(),
+    };
+
+    saveLocal();
+    populateFilters();
+    render();
+    const count = AI.pendingChanges.length;
+    flashHint(`✓ Applied ${count} AI change${count === 1 ? '' : 's'}`);
+    aiResetSession();
+    // Panel stays open — user said they want to keep iterating in the chat.
+    aiAppendMessage('assistant', `✓ Approved and committed ${count} change${count === 1 ? '' : 's'}.`);
+  }
+
+  // Called by the supabase module after each upsertAll batch. If any of the
+  // rows the latest Approve wrote ended up in the conflict list (version
+  // race lost), tell the user — those edits did not make it to the server.
+  function aiOnWriteResult({ writtenIds, conflictIds }) {
+    if (!AI.pendingApproveIds) return;
+    // Stale guard — pendingApproveIds is for a specific recent Approve. If
+    // the write came back > 30s later it's probably from a manual edit, not
+    // our Approve. (Most batches complete in well under a second.)
+    if (Date.now() - AI.pendingApproveIds.timestamp > 30_000) {
+      AI.pendingApproveIds = null;
+      return;
+    }
+    const tracked = AI.pendingApproveIds.ids;
+    const lostIds = (conflictIds || []).filter(id => tracked.has(id));
+    if (lostIds.length) {
+      aiAppendMessage('assistant',
+        `⚠ Version conflict on ${lostIds.length} row${lostIds.length === 1 ? '' : 's'} (${lostIds.join(', ')}) — ` +
+        `someone else edited ${lostIds.length === 1 ? 'it' : 'them'} first. Your AI edits to ${lostIds.length === 1 ? 'that row' : 'those rows'} did NOT save; the local state will refresh shortly. ` +
+        `Re-state the change if you still want it.`);
+    }
+    AI.pendingApproveIds = null;
+  }
+
+  // `silent` defaults to false so the inline `onclick="aiDiscard()"` works
+  // without a wrapper. Earlier we shimmed `window.aiDiscard = () => aiDiscard(false)`
+  // — but in non-module scripts a function declaration also creates a window
+  // property, so that assignment overwrote the function itself and the wrapper
+  // called itself recursively. Default param + direct window export fixes it.
+  function aiDiscard(silent = false) {
+    const hadDraft = !!AI.draft;
+    const hadClari = Object.keys(AI.clarifications || {}).length > 0;
+    aiResetSession();
+    if (!silent) {
+      if (hadDraft || hadClari) aiAppendMessage('assistant', '🗑 Discarded pending changes.');
+      else aiAppendMessage('assistant', 'Nothing to discard.');
+      flashHint('Discarded');
+    }
+  }
+
+  // Wipe draft + pending state + any open clarifications and reset the chat log
+  // back to a fresh greeting. Used by both Approve and Discard.
+  function aiResetSession() {
+    AI.draft = null;
+    AI.baseSnapshot = null;
+    AI.pendingChanges = [];
+    AI.clarifications = {};
+    AI.chatHistory = [];
+    AI.opQueue = [];
+    AI.opSourceText = '';
+    // Defensive UI clear — don't rely on aiRenderPreview's branch alone.
+    const preview = document.getElementById('ai-preview');
+    if (preview) preview.innerHTML = '';
+    const meta = document.getElementById('ai-meta');
+    if (meta) meta.textContent = 'no pending changes';
+    const actions = document.getElementById('ai-actions');
+    if (actions) actions.style.display = 'none';
+    aiRenderPreview();
+    const log = document.getElementById('ai-log');
+    if (log) {
+      const keep = log.querySelector('.ai-msg-system');
+      log.innerHTML = '';
+      if (keep) log.appendChild(keep);
+    }
+  }
+
+  // ---- chat UI plumbing ----
+  // Append a chat row whose body is a pre-built HTML string. Used ONLY for
+  // capabilities — every other path uses aiAppendMessage with textContent
+  // so user / LLM strings can't smuggle HTML into the chat log.
+  function aiAppendHtmlMessage(role, html, extraClass) {
+    const log = document.getElementById('ai-log');
+    if (!log) return;
+    const el = document.createElement('div');
+    el.className = 'ai-msg ai-msg-' + role + (extraClass ? ' ' + extraClass : '');
+    el.innerHTML = html;
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  // Toggle the "what can the AI do?" panel in the chat log. First click
+  // renders it; second click removes it (no stacking). Triggered by the
+  // ⓘ button in the panel header. Categorised so users can scan; examples
+  // are pulled from the same utterances used in the LLM examples.
+  function aiShowCapabilities() {
+    const log = document.getElementById('ai-log');
+    if (!log) return;
+    const existing = log.querySelector('.ai-caps');
+    if (existing) { existing.remove(); return; }
+    const html = `
+      <h4>✏ Edit a task</h4>
+      <ul>
+        <li><b>Move dates</b> — <em>"BESS for Glossodia is delayed by 2 weeks"</em></li>
+        <li><b>Rename</b> — <em>"Rename BESS delivery to BESS install"</em></li>
+        <li><b>Change duration / budget</b> — <em>"Change grid connection in Glossodia to 10 days"</em></li>
+        <li><b>Mark progress</b> — <em>"DA approval for Glossodia is now complete"</em> or <em>"BESS procurement is 40% done"</em></li>
+        <li><b>Assign owner</b> — <em>"Assign commissioning on Glossodia to Sarah"</em></li>
+        <li><b>Delete</b> — <em>"Delete the inverter installation task in Riverstone"</em></li>
+      </ul>
+      <h4>🧱 Restructure</h4>
+      <ul>
+        <li><b>Add task / subtask / project</b> — <em>"Add grid connection to Glossodia, due next Friday"</em></li>
+        <li><b>Set dependency</b> — <em>"Make commissioning depend on BESS delivery"</em></li>
+        <li><b>Fit a new project in</b> — <em>"New 500kW solar at Penrith starting in July — can we fit it?"</em></li>
+      </ul>
+      <h4>🔍 Ask (no changes)</h4>
+      <ul>
+        <li><b>Progress / dates / slack</b> — <em>"What's the progress of BESS delivery?"</em>, <em>"When does inverter installation finish?"</em>, <em>"Who owns commissioning?"</em></li>
+      </ul>
+      <h4>📚 Tips</h4>
+      <ul>
+        <li>You can stack multiple commands in one message — each is shown as a checkbox so you can untick any I misread.</li>
+        <li>Changes stage to a draft. <b>Approve all</b> to save, <b>Discard</b> to drop, or keep going to add more.</li>
+        <li>If I'm unsure which project, task, or person you mean, I'll show you candidates to pick from.</li>
+      </ul>
+    `.trim();
+    aiAppendHtmlMessage('assistant', html, 'ai-caps');
+  }
+
+  function aiAppendMessage(role, text) {
+    const log = document.getElementById('ai-log');
+    if (!log) return;
+    const el = document.createElement('div');
+    el.className = 'ai-msg ai-msg-' + role;
+    el.textContent = text;
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+    // Roll into the conversation buffer for the next LLM call.
+    aiPushHistory(role, text);
+  }
+
+  async function aiOnSend() {
+    const input = document.getElementById('ai-input');
+    const txt = (input.value || '').trim();
+    if (!txt) return;
+    aiAppendMessage('user', txt);
+    input.value = '';
+    AI.defaultModel = document.getElementById('ai-model').value || 'sonnet';
+    const btn = document.getElementById('ai-send');
+    btn.disabled = true;
+    const orig = btn.textContent;
+    btn.textContent = '…';
+    try {
+      await aiSubmitChange(txt);
+    } catch (e) {
+      aiAppendMessage('assistant', '✗ ' + (e.message || String(e)));
+    } finally {
+      btn.disabled = false;
+      btn.textContent = orig;
+      input.focus();
+    }
+  }
+
+  function aiOnKeydown(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      aiOnSend();
+    }
+  }
+
+  function aiTogglePanel() {
+    const p = document.getElementById('ai-panel');
+    if (!p) return;
+    p.classList.toggle('open');
+    if (p.classList.contains('open')) {
+      setTimeout(() => document.getElementById('ai-input')?.focus(), 50);
+    }
+  }
+
+  // Expose handlers for inline onclick=…
+  window.aiTogglePanel       = aiTogglePanel;
+  window.aiOnSend            = aiOnSend;
+  window.aiOnKeydown         = aiOnKeydown;
+  window.aiApprove           = aiApprove;
+  window.aiDiscard           = aiDiscard;
+  window.aiAddMore           = () => document.getElementById('ai-input')?.focus();
+  window.aiOnCandidatePick   = aiOnCandidatePick;
+  window.aiOnCandidateCancel = aiOnCandidateCancel;
+  window.aiOnFieldChoice     = aiOnFieldChoice;
+  window.aiOnModeChoice      = aiOnModeChoice;
+  window.aiOnTemplatePick    = aiOnTemplatePick;
+  window.aiOnWindowPick      = aiOnWindowPick;
+  window.aiOnBatchApply      = aiOnBatchApply;
+  window.aiOnBatchCancel     = aiOnBatchCancel;
+  window.aiOnBatchEdit       = aiOnBatchEdit;
+  window.aiOnBatchToggleSkip = aiOnBatchToggleSkip;
+  window.aiOnOwnerPick       = aiOnOwnerPick;
+  window.aiOnOwnerUseAsNew   = aiOnOwnerUseAsNew;
+  window.aiShowCapabilities  = aiShowCapabilities;
+  // Hook called by the supabase realtime callbacks after they merge a remote
+  // edit into NODES, so the AI panel can rebuild its draft on top.
+  window.__aiOnRemoteSync    = aiOnRemoteSync;
+  // Hook called by upsertAll after each write batch — pairs reported
+  // conflictIds with the most recent Approve so OCC failures surface in chat.
+  window.__onWriteResult     = aiOnWriteResult;
   </script>
 </body>
 </html>

@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>LLM Action Extraction — Test Runner</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #1a1d24;
+    --panel-2: #20242d;
+    --border: #2a2e38;
+    --text: #e6e8ee;
+    --muted: #8a90a0;
+    --accent: #6ea8fe;
+    --pass: #4ade80;
+    --fail: #f87171;
+    --pending: #fbbf24;
+    --user: #2a3a5a;
+    --assistant: #243024;
+    --error: #5a2a2a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  header h1 { font-size: 14px; margin: 0 12px 0 0; font-weight: 600; }
+  header label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+  input, select, textarea, button {
+    background: #0b0d12;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 13px;
+    font-family: inherit;
+  }
+  input { min-width: 180px; }
+  input.wide { min-width: 320px; }
+  button {
+    cursor: pointer;
+    background: var(--accent);
+    color: #0b0d12;
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+  button:hover { opacity: 0.9; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.ghost { background: transparent; color: var(--muted); border-color: var(--border); font-weight: normal; }
+  main {
+    padding: 16px;
+    max-width: 1100px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .section-title {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    margin: 0;
+  }
+  .summary {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    align-items: center;
+    font-size: 13px;
+  }
+  .summary .stat { display: flex; gap: 6px; align-items: center; }
+  .summary .num { font-weight: 700; font-size: 16px; }
+  .summary .pass { color: var(--pass); }
+  .summary .fail { color: var(--fail); }
+  .summary .pending { color: var(--pending); }
+  .test {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .test-head {
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .test-head:hover { background: var(--panel-2); }
+  .badge {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 999px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    min-width: 56px;
+    text-align: center;
+  }
+  .badge.pass { background: #14361f; color: var(--pass); border: 1px solid #1f5a31; }
+  .badge.fail { background: #3b1414; color: var(--fail); border: 1px solid #6e1f1f; }
+  .badge.pending { background: #3b2a14; color: var(--pending); border: 1px solid #6e4d1f; }
+  .badge.idle { background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); }
+  .test-name { flex: 1; font-size: 14px; font-weight: 500; }
+  .test-meta { font-size: 11px; color: var(--muted); }
+  .test-body {
+    padding: 0 14px 14px;
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+    border-top: 1px solid var(--border);
+  }
+  .test.open .test-body { display: flex; }
+  .test.fail .test-body { display: flex; } /* auto-expand failures */
+  .kv {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    gap: 8px 12px;
+    font-size: 12px;
+  }
+  .kv .k { color: var(--muted); }
+  pre {
+    background: #0b0d12;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    overflow-x: auto;
+    font-size: 12px;
+    line-height: 1.5;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .reason {
+    font-size: 12px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border-left: 3px solid var(--border);
+    background: var(--panel-2);
+  }
+  .reason.fail { border-color: var(--fail); color: #fcd0d0; }
+  .reason.pass { border-color: var(--pass); color: #c8f3d4; }
+  /* Manual playground */
+  .playground {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .playground .row { display: flex; gap: 8px; align-items: center; }
+  #pgInput { width: 100%; min-height: 60px; resize: vertical; font-size: 13px; }
+  #pgResult { font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>LLM Action Extraction · Test Runner</h1>
+  <label>URL
+    <input id="url" class="wide" value="http://127.0.0.1:54321/functions/v1/chat" />
+  </label>
+  <label>anon key
+    <input id="key" class="wide" placeholder="sb_publishable_... (from `supabase status`)" />
+  </label>
+  <label>Model
+    <select id="model">
+      <option value="haiku">haiku</option>
+      <option value="sonnet" selected>sonnet</option>
+      <option value="opus">opus</option>
+    </select>
+  </label>
+  <button id="runAll">Run all tests</button>
+  <button id="expandAll" class="ghost">Expand all</button>
+  <button id="collapseAll" class="ghost">Collapse all</button>
+</header>
+
+<main>
+  <div class="summary" id="summary">
+    <div class="stat"><span class="num" id="sTotal">0</span> total</div>
+    <div class="stat"><span class="num pass" id="sPass">0</span> passed</div>
+    <div class="stat"><span class="num fail" id="sFail">0</span> failed</div>
+    <div class="stat"><span class="num pending" id="sPending">0</span> pending</div>
+    <div class="stat"><span id="sStatus">Click "Run all tests" to start.</span></div>
+  </div>
+
+  <h2 class="section-title">Tests</h2>
+  <div id="tests"></div>
+
+  <h2 class="section-title">Manual playground</h2>
+  <div class="playground">
+    <textarea id="pgInput" placeholder="Type a message and press Send to extract action JSON.">BESS for Glossodia is delayed by 2 weeks.</textarea>
+    <div class="row">
+      <button id="pgSend">Send</button>
+      <button id="pgClear" class="ghost">Clear</button>
+      <span id="pgMeta" style="font-size: 12px; color: var(--muted);"></span>
+    </div>
+    <pre id="pgResult"></pre>
+  </div>
+</main>
+
+<script>
+  const $ = id => document.getElementById(id);
+
+  // -- persist settings --
+  ['url', 'key', 'model'].forEach(k => {
+    const v = localStorage.getItem('llm_test_' + k);
+    if (v) $(k).value = v;
+    $(k).addEventListener('change', () => localStorage.setItem('llm_test_' + k, $(k).value));
+  });
+
+  // -- shared request helper --
+  async function callFn({ body, raw, method = 'POST', skipBody = false }) {
+    const url = $('url').value.trim();
+    const key = $('key').value.trim();
+    if (!key) throw new Error('Missing anon/publishable key (paste from `supabase status`).');
+
+    const headers = {
+      'apikey': key,
+      'Authorization': 'Bearer ' + key,
+    };
+    let fetchBody;
+    if (!skipBody) {
+      headers['Content-Type'] = 'application/json';
+      fetchBody = raw !== undefined ? raw : JSON.stringify(body);
+    }
+
+    const t0 = performance.now();
+    const res = await fetch(url, { method, headers, body: fetchBody });
+    const ms = Math.round(performance.now() - t0);
+
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); } catch { data = text; }
+    return { status: res.status, ok: res.ok, data, ms };
+  }
+
+  // -- expectation helpers --
+  const isExtraction = (d) =>
+    d && typeof d === 'object' &&
+    'operation' in d && 'target' in d && 'parameters' in d &&
+    'reasoning' in d && 'confidence' in d &&
+    'needs_clarification' in d && 'missing_fields' in d;
+
+  const isFallback = (d) =>
+    isExtraction(d) &&
+    d.operation === 'N/A' &&
+    d.target && d.target.project === 'N/A' && d.target.item === 'N/A' &&
+    d.confidence === 'low';
+
+  // -- test definitions --
+  // Each test: { name, describe, request, check(res) -> { ok, reason } }
+  const tests = [
+    {
+      name: 'Shift item — delay extraction',
+      describe: 'Sends a project delay sentence and expects shift_item with direction:later and amount:2 weeks.',
+      request: () => ({ body: { message: 'BESS for Glossodia is delayed by 2 weeks.', model: $('model').value } }),
+      check: ({ status, data }) => {
+        if (status !== 200) return { ok: false, reason: `Expected 200, got ${status}` };
+        if (!isExtraction(data)) return { ok: false, reason: 'Response is not an extraction object' };
+        const checks = [
+          [data.operation === 'shift_item', `operation should be "shift_item", got "${data.operation}"`],
+          [/glossodia/i.test(data.target.project), `target.project should mention "Glossodia", got "${data.target.project}"`],
+          [/bess/i.test(data.target.item), `target.item should mention "BESS", got "${data.target.item}"`],
+          [data.parameters.direction === 'later', `parameters.direction should be "later", got "${data.parameters.direction}"`],
+          [Number(data.parameters.amount) === 2, `parameters.amount should be 2, got "${data.parameters.amount}"`],
+          [data.parameters.unit === 'weeks', `parameters.unit should be "weeks", got "${data.parameters.unit}"`],
+          [data.confidence === 'high' || data.confidence === 'medium', `confidence should be high/medium, got "${data.confidence}"`],
+        ];
+        const failed = checks.find(c => !c[0]);
+        return failed ? { ok: false, reason: failed[1] } : { ok: true, reason: 'All fields look right.' };
+      },
+    },
+    {
+      name: 'Create item with deadline',
+      describe: 'Tests a create_item operation with a deadline parameter.',
+      request: () => ({ body: { message: 'Add grid connection application to Riverstone and make it due next Friday.', model: $('model').value } }),
+      check: ({ status, data }) => {
+        if (status !== 200) return { ok: false, reason: `Expected 200, got ${status}` };
+        if (!isExtraction(data)) return { ok: false, reason: 'Response is not an extraction object' };
+        const checks = [
+          [data.operation === 'create_item', `operation should be "create_item", got "${data.operation}"`],
+          [/riverstone/i.test(data.target.project), `target.project should mention "Riverstone", got "${data.target.project}"`],
+          [/grid/i.test(data.target.item), `target.item should mention "grid", got "${data.target.item}"`],
+          [/friday/i.test(data.parameters.deadline), `parameters.deadline should mention "Friday", got "${data.parameters.deadline}"`],
+        ];
+        const failed = checks.find(c => !c[0]);
+        return failed ? { ok: false, reason: failed[1] } : { ok: true, reason: 'All fields look right.' };
+      },
+    },
+    {
+      name: 'Update progress with messages[] array',
+      describe: 'Verifies the function picks the latest user message from a messages[] history and emits update_progress.',
+      request: () => ({ body: { messages: [
+        { role: 'user', content: 'Hi there' },
+        { role: 'assistant', content: 'Hello, how can I help?' },
+        { role: 'user', content: 'DA approval for Glossodia is now complete.' },
+      ], model: $('model').value } }),
+      check: ({ status, data }) => {
+        if (status !== 200) return { ok: false, reason: `Expected 200, got ${status}` };
+        if (!isExtraction(data)) return { ok: false, reason: 'Response is not an extraction object' };
+        const checks = [
+          [data.operation === 'update_progress', `operation should be "update_progress", got "${data.operation}"`],
+          [/glossodia/i.test(data.target.project), `target.project should mention "Glossodia", got "${data.target.project}"`],
+          [/da|approval/i.test(data.target.item), `target.item should mention "DA"/"approval", got "${data.target.item}"`],
+          [Number(data.parameters.percent_done) === 100, `parameters.percent_done should be 100, got "${data.parameters.percent_done}"`],
+        ];
+        const failed = checks.find(c => !c[0]);
+        return failed ? { ok: false, reason: failed[1] } : { ok: true, reason: 'Latest user message extracted correctly.' };
+      },
+    },
+    {
+      name: 'Non-project message returns fallback',
+      describe: 'Conversational/educational message should yield all-N/A fallback with low confidence.',
+      request: () => ({ body: { message: 'Can you explain what BESS means?', model: $('model').value } }),
+      check: ({ status, data }) => {
+        if (status !== 200) return { ok: false, reason: `Expected 200, got ${status}` };
+        if (!isExtraction(data)) return { ok: false, reason: 'Response is not an extraction object' };
+        return isFallback(data)
+          ? { ok: true, reason: 'Returned fallback as expected.' }
+          : { ok: false, reason: 'Expected all-N/A fallback, got non-fallback values.' };
+      },
+    },
+    {
+      name: 'Empty message returns fallback without LLM call',
+      describe: 'An empty message should short-circuit to fallback (server-side, no upstream call).',
+      request: () => ({ body: { message: '', model: $('model').value } }),
+      check: ({ status, data, ms }) => {
+        if (status !== 200) return { ok: false, reason: `Expected 200, got ${status}` };
+        if (!isFallback(data)) return { ok: false, reason: 'Expected all-N/A fallback for empty message.' };
+        // Should be fast since no LLM call. Just warn if slow, not fail.
+        return { ok: true, reason: `Fallback returned in ${ms}ms (no LLM call expected).` };
+      },
+    },
+    {
+      name: 'Unknown model returns 400',
+      describe: 'Requesting a model outside the allow-list should return HTTP 400.',
+      request: () => ({ body: { message: 'test', model: 'gpt-5-ultra' } }),
+      check: ({ status, data }) => {
+        if (status !== 400) return { ok: false, reason: `Expected 400, got ${status}` };
+        if (!data || typeof data !== 'object' || !/unknown model/i.test(data.error || '')) {
+          return { ok: false, reason: `Expected error mentioning "Unknown model", got ${JSON.stringify(data)}` };
+        }
+        return { ok: true, reason: '400 with expected error message.' };
+      },
+    },
+    {
+      name: 'GET method returns 405',
+      describe: 'Only POST (and OPTIONS) are allowed; GET should be rejected.',
+      request: () => ({ method: 'GET', skipBody: true }),
+      check: ({ status }) => {
+        if (status !== 405) return { ok: false, reason: `Expected 405, got ${status}` };
+        return { ok: true, reason: 'Correctly rejected non-POST method.' };
+      },
+    },
+    {
+      name: 'Invalid JSON body returns 400',
+      describe: 'Sending malformed JSON should be rejected with HTTP 400.',
+      request: () => ({ raw: 'this is not valid json{' }),
+      check: ({ status, data }) => {
+        if (status !== 400) return { ok: false, reason: `Expected 400, got ${status}` };
+        if (!data || typeof data !== 'object' || !/invalid json/i.test(data.error || '')) {
+          return { ok: false, reason: `Expected "Invalid JSON body" error, got ${JSON.stringify(data)}` };
+        }
+        return { ok: true, reason: '400 with expected error message.' };
+      },
+    },
+    {
+      name: 'CORS preflight (OPTIONS) returns 2xx',
+      describe: 'OPTIONS request should be answered with a 2xx (200 or 204) so CORS preflight passes.',
+      request: () => ({ method: 'OPTIONS', skipBody: true }),
+      check: ({ status }) => {
+        if (status < 200 || status >= 300) return { ok: false, reason: `Expected 2xx, got ${status}` };
+        return { ok: true, reason: `CORS preflight succeeded (${status}).` };
+      },
+    },
+  ];
+
+  // -- render --
+  const testsEl = $('tests');
+  const cards = tests.map((t, i) => {
+    const el = document.createElement('div');
+    el.className = 'test';
+    el.dataset.idx = i;
+    el.innerHTML = `
+      <div class="test-head">
+        <span class="badge idle" data-role="badge">idle</span>
+        <span class="test-name"></span>
+        <span class="test-meta" data-role="meta"></span>
+      </div>
+      <div class="test-body">
+        <div class="reason" data-role="reason">Not yet run.</div>
+        <div class="kv">
+          <div class="k">Description</div><div data-role="describe"></div>
+          <div class="k">Request</div><div><pre data-role="req"></pre></div>
+          <div class="k">Response</div><div><pre data-role="res"></pre></div>
+        </div>
+      </div>
+    `;
+    el.querySelector('.test-name').textContent = t.name;
+    el.querySelector('[data-role="describe"]').textContent = t.describe;
+    el.querySelector('.test-head').addEventListener('click', () => el.classList.toggle('open'));
+    testsEl.appendChild(el);
+    return el;
+  });
+
+  function setStatus(idx, status, info = {}) {
+    const card = cards[idx];
+    const badge = card.querySelector('[data-role="badge"]');
+    const meta = card.querySelector('[data-role="meta"]');
+    const reason = card.querySelector('[data-role="reason"]');
+    const req = card.querySelector('[data-role="req"]');
+    const res = card.querySelector('[data-role="res"]');
+
+    card.classList.remove('pass', 'fail', 'pending');
+    if (status !== 'idle') card.classList.add(status);
+
+    badge.className = 'badge ' + status;
+    badge.textContent = status;
+    meta.textContent = info.ms != null ? `${info.ms}ms` : '';
+
+    if (info.reason) {
+      reason.textContent = info.reason;
+      reason.className = 'reason ' + (status === 'pass' ? 'pass' : status === 'fail' ? 'fail' : '');
+    }
+    if (info.req !== undefined) req.textContent = info.req;
+    if (info.res !== undefined) res.textContent = info.res;
+  }
+
+  function updateSummary() {
+    const total = tests.length;
+    let pass = 0, fail = 0, pending = 0;
+    cards.forEach(c => {
+      if (c.classList.contains('pass')) pass++;
+      else if (c.classList.contains('fail')) fail++;
+      else if (c.classList.contains('pending')) pending++;
+    });
+    $('sTotal').textContent = total;
+    $('sPass').textContent = pass;
+    $('sFail').textContent = fail;
+    $('sPending').textContent = pending;
+  }
+
+  async function runAll() {
+    $('runAll').disabled = true;
+    $('sStatus').textContent = 'Running...';
+    cards.forEach((_, i) => setStatus(i, 'idle', { reason: 'Not yet run.', req: '', res: '' }));
+    updateSummary();
+
+    let pass = 0, fail = 0;
+    for (let i = 0; i < tests.length; i++) {
+      const t = tests[i];
+      setStatus(i, 'pending', { reason: 'Running...' });
+      updateSummary();
+
+      let req;
+      try {
+        req = t.request();
+      } catch (err) {
+        setStatus(i, 'fail', { reason: 'Failed to build request: ' + err.message });
+        fail++;
+        updateSummary();
+        continue;
+      }
+
+      const reqDisplay = JSON.stringify({
+        method: req.method || 'POST',
+        body: req.raw !== undefined ? req.raw : req.body,
+      }, null, 2);
+
+      try {
+        const result = await callFn(req);
+        const resDisplay = `HTTP ${result.status} (${result.ms}ms)\n\n` +
+          (typeof result.data === 'string' ? result.data : JSON.stringify(result.data, null, 2));
+        const verdict = t.check(result);
+        setStatus(i, verdict.ok ? 'pass' : 'fail', {
+          ms: result.ms,
+          reason: verdict.reason,
+          req: reqDisplay,
+          res: resDisplay,
+        });
+        if (verdict.ok) pass++; else fail++;
+      } catch (err) {
+        setStatus(i, 'fail', {
+          reason: 'Request threw: ' + err.message,
+          req: reqDisplay,
+          res: '(no response)',
+        });
+        fail++;
+      }
+      updateSummary();
+    }
+
+    $('sStatus').textContent = fail === 0
+      ? `All ${pass} tests passed.`
+      : `${pass} passed, ${fail} failed.`;
+    $('runAll').disabled = false;
+  }
+
+  $('runAll').addEventListener('click', runAll);
+  $('expandAll').addEventListener('click', () => cards.forEach(c => c.classList.add('open')));
+  $('collapseAll').addEventListener('click', () => cards.forEach(c => {
+    c.classList.remove('open');
+    // Note: failed tests stay visible because of `.test.fail .test-body { display: flex }`
+  }));
+
+  // -- manual playground --
+  async function pgSend() {
+    const text = $('pgInput').value;
+    $('pgMeta').textContent = 'Sending...';
+    $('pgResult').textContent = '';
+    try {
+      const result = await callFn({ body: { message: text, model: $('model').value } });
+      $('pgMeta').textContent = `HTTP ${result.status} · ${result.ms}ms`;
+      $('pgResult').textContent = typeof result.data === 'string'
+        ? result.data
+        : JSON.stringify(result.data, null, 2);
+    } catch (err) {
+      $('pgMeta').textContent = 'error';
+      $('pgResult').textContent = err.message;
+    }
+  }
+  $('pgSend').addEventListener('click', pgSend);
+  $('pgClear').addEventListener('click', () => {
+    $('pgInput').value = '';
+    $('pgResult').textContent = '';
+    $('pgMeta').textContent = '';
+  });
+  $('pgInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      pgSend();
+    }
+  });
+
+  updateSummary();
+</script>
+</body>
+</html>

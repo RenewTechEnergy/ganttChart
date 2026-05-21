@@ -1,0 +1,11 @@
+{
+  "name": "gantt-chart-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test 'tests/*.test.js'"
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.0"
+  }
+}

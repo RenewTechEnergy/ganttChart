@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>AI edit tests · accept / reject / concurrent</title>
+<style>
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; padding: 20px; background: #0f172a; color: #e5e7eb; font-size: 13px; line-height: 1.5; }
+  h1 { font-size: 16px; color: #38bdf8; margin: 0 0 6px; }
+  .subtitle { color: #94a3b8; margin-bottom: 16px; font-size: 12px; max-width: 720px; }
+  .caveat { color: #fbbf24; font-size: 11px; margin-top: 8px; max-width: 720px; }
+  #out { white-space: pre; }
+  #out > div { padding: 1px 0; }
+  .suite { color: #fbbf24; font-weight: 700; margin-top: 6px; }
+  .pass { color: #4ade80; }
+  .fail { color: #f87171; font-weight: 600; }
+  .todo { color: #fbbf24; }
+</style>
+</head>
+<body>
+  <h1>AI edit tests · draft pipeline + multi-user OCC</h1>
+  <div class="subtitle">
+    Tests the AI-assisted editing pipeline from <code>index.html</code> — intent
+    → draft mutation → CPM cycle detection → approve/discard — and the
+    interaction with the OCC save path when two users edit the same board.
+  </div>
+  <div class="caveat">
+    Scope reminder: these tests drive the JavaScript state machine with a
+    fake in-memory server. They do <b>not</b> exercise the live LLM (covered
+    by test_llm.html), Fuse.js fuzzy matching (Fuse isn't loaded — the
+    substring fallback is exercised instead), or real network/realtime
+    timing.
+  </div>
+  <div id="out"></div>
+  <script src="test_ai_edit.js"></script>
+</body>
+</html>
