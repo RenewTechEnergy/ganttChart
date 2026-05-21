@@ -7781,12 +7781,18 @@ Phase                                Dur (d)   Predecessor
     ].join('');
   }
 
-  // Mutate the stashed op when a field changes, then re-render the editor.
+  // Mutate the stashed op when a field changes. Re-renders ONLY for
+  // structural changes (op type, item_type, project, owner mode) where
+  // dependent controls need to refresh. Text-input edits update state in
+  // place — re-rendering on every keystroke destroys the <input> and
+  // kills focus, leaving the user able to type only one character at a
+  // time.
   function aiOnBatchEdit(stashId, idx, field, value) {
     const stash = AI.clarifications[stashId];
     if (!stash) return;
     const op = stash.ops[idx];
     if (!op) return;
+    let needRerender = false;
     switch (field) {
       case 'operation':
         op.operation = value;
@@ -7795,10 +7801,12 @@ Phase                                Dur (d)   Predecessor
         op.target._pinnedParentId = undefined;
         op.target._pinnedProjectId = undefined;
         op.parameters._pinnedPredId = undefined;
+        needRerender = true;
         break;
       case 'item_type':
         op.target.item_type = value;
         op.target._pinnedParentId = undefined;
+        needRerender = true;
         break;
       case 'project':
         op.target._pinnedProjectId = value;
@@ -7806,26 +7814,22 @@ Phase                                Dur (d)   Predecessor
         op.target._pinnedId = undefined;
         op.target._pinnedParentId = undefined;
         op.parameters._pinnedPredId = undefined;
-        // Update target.project to the chosen project's NAME so any later
-        // resolver path (e.g. on commit when _pinnedProjectId is unused)
-        // still hits the right project.
         {
           const p = aiBatchNodes().find(n => n.id === value);
           if (p) op.target.project = p.name || value;
         }
+        needRerender = true;
         break;
       case 'parent':
         op.target._pinnedParentId = value;
         break;
       case 'item':
-        op.target._pinnedId = value;
-        // For create_item, "Name" maps to op.target.item (text field uses
-        // field='item' too) — only set the pinned id for non-create ops.
         if (op.operation !== 'create_item') {
+          op.target._pinnedId = value;
           const n = aiBatchNodes().find(x => x.id === value);
           if (n) op.target.item = n.name || value;
         } else {
-          // create_item uses the typed string directly.
+          // create_item — "Name" field is a free text input.
           op.target.item = value;
         }
         break;
@@ -7837,25 +7841,23 @@ Phase                                Dur (d)   Predecessor
         }
         break;
       case 'predecessors':
-        // Free-text list — split on commas / "and" so the create_item
-        // applier can resolve each name. Stored as the array form.
         op.parameters.predecessors = aiNormalisePredNames(value);
-        // Keep the singular field in sync for back-compat with non-create ops.
         if (op.operation !== 'create_item') {
           op.parameters.predecessor = op.parameters.predecessors[0] || 'N/A';
         }
         break;
       case 'owner':
         op.parameters.owner = value;
-        // Existing owner picked → mark resolved so the gate doesn't fire.
         op.parameters._ownerResolved = !!value && value !== '__new__';
         op.parameters._ownerNewMode  = value === '__new__';
         if (!op.parameters._ownerNewMode) op.parameters._ownerNew = '';
+        // Re-render so the "New owner" row appears/disappears.
+        needRerender = true;
         break;
       case 'ownerNew':
         op.parameters._ownerNew = value;
         op.parameters.owner = value;
-        op.parameters._ownerResolved = false; // user is making a NEW owner
+        op.parameters._ownerResolved = false;
         break;
       case 'candName':
         op.target.project = value;
@@ -7863,7 +7865,7 @@ Phase                                Dur (d)   Predecessor
       default:
         op.parameters[field] = value;
     }
-    aiRenderBatchEditor(stashId);
+    if (needRerender) aiRenderBatchEditor(stashId);
   }
 
   function aiOnBatchToggleSkip(stashId, idx, skipped) {
@@ -8138,13 +8140,12 @@ Phase                                Dur (d)   Predecessor
     document.querySelector(`.ai-clarify[data-stash="${stashId}"]`)?.remove();
     delete AI.clarifications[stashId];
     aiAppendMessage('user', `→ ${chosen.name || chosen.id}`);
-    // shift_item still needs the field + mode prompts after a target pick.
-    // Anything else can go straight to commit.
-    if (op.operation === 'shift_item') {
-      aiContinueShift(op, stash.sourceText);
-    } else {
-      aiCommitOperation(op, stash.sourceText);
-    }
+    // Re-enter the single dispatcher. aiDispatchOp knows every op type:
+    // query_schedule answers in chat, shift_item walks its field/mode
+    // prompts, create_item respects any pin we just set, etc. Calling
+    // aiCommitOperation directly skipped query_schedule and reported it
+    // as "Unsupported operation".
+    aiDispatchOp(op, stash.sourceText);
   }
 
   function aiOnCandidateCancel(stashId) {
