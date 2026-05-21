@@ -16,10 +16,3 @@ export interface Provider {
   readonly name: string;
   chat(req: ProviderRequest): Promise<ProviderResult>;
 }
-
-export class MissingApiKeyError extends Error {
-  constructor(envVar: string) {
-    super(`Missing ${envVar}`);
-    this.name = "MissingApiKeyError";
-  }
-}

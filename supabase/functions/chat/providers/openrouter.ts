@@ -1,6 +1,5 @@
 import type { Provider, ProviderRequest, ProviderResult } from "./types.ts";
-import { MissingApiKeyError } from "./types.ts";
-import { systemMessage } from "../system-message.ts";
+import { systemMessage, BOARD_CONTEXT_PREAMBLE } from "../system-message.ts";
 import type { ModelKey } from "../schema.ts";
 
 // OpenRouter routes Anthropic models behind the `anthropic/` prefix.
@@ -15,14 +14,14 @@ export const openrouterProvider: Provider = {
 
   async chat(req: ProviderRequest): Promise<ProviderResult> {
     const apiKey = Deno.env.get("OPENROUTER_API_KEY");
-    if (!apiKey) throw new MissingApiKeyError("OPENROUTER_API_KEY");
+    if (!apiKey) {
+      return { ok: false, status: 500, error: "Missing OPENROUTER_API_KEY" };
+    }
 
     const contextMessages = req.boardContext
       ? [{
           role: "system" as const,
-          content:
-            "Current board state (use the IDs verbatim in `target.parent` or `parameters.predecessor` when the user names something already on the board). Items not listed here do not exist yet — for those, use create_item.\n\n" +
-            req.boardContext,
+          content: BOARD_CONTEXT_PREAMBLE + req.boardContext,
         }]
       : [];
 

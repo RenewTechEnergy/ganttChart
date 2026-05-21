@@ -11,7 +11,6 @@ import {
   parseCompletion,
 } from "./schema.ts";
 import { openrouterProvider } from "./providers/openrouter.ts";
-import { MissingApiKeyError } from "./providers/types.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -104,22 +103,11 @@ export default {
       const boardContextRaw = typeof body.boardContext === "string" ? body.boardContext : "";
       const boardContext = boardContextRaw.slice(0, 8000).trim();
 
-      let result;
-      try {
-        result = await openrouterProvider.chat({
-          model: requestedModel,
-          conversation: convo,
-          boardContext,
-        });
-      } catch (err) {
-        if (err instanceof MissingApiKeyError) {
-          return new Response(
-            JSON.stringify({ error: err.message }),
-            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-          );
-        }
-        throw err;
-      }
+      const result = await openrouterProvider.chat({
+        model: requestedModel,
+        conversation: convo,
+        boardContext,
+      });
 
       if (!result.ok) {
         return new Response(

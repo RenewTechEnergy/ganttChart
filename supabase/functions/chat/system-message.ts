@@ -193,3 +193,9 @@ Output:
 };
 
 export const systemPromptText = systemMessage.content;
+
+// Provider-agnostic preamble for the board-context block. The provider decides
+// HOW to format it (OpenRouter wraps it in a system message; Anthropic concatenates
+// it onto the system prompt). The TEXT lives here so both stay in sync.
+export const BOARD_CONTEXT_PREAMBLE =
+  "Current board state (use the IDs verbatim in `target.parent` or `parameters.predecessor` when the user names something already on the board). Items not listed here do not exist yet — for those, use create_item.\n\n";
