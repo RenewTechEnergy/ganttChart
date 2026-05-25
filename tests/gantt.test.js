@@ -182,3 +182,46 @@ describe('renumberMergedTasks (merge into existing project)', () => {
     assert.equal(nodes.length, 0);
   });
 });
+
+// ─── rewriteImportPreds ──────────────────────────────────────────────────
+// Given an import remap (old-id → new-id) and a list of nodes with a
+// `predecessors` string field (comma-separated), produce a new node list
+// where each pred id is replaced via the remap. Refs outside the remap
+// are kept as-is (these are refs out of the imported set, into existing
+// rows on the board).
+function rewriteImportPreds(remap, nodes) {
+  return nodes.map(n => {
+    if (!n.predecessors) return n;
+    const rewritten = n.predecessors
+      .split(/[,;]/)
+      .map(p => p.trim())
+      .filter(Boolean)
+      .map(p => remap.get(p) || p)
+      .join(', ');
+    return { ...n, predecessors: rewritten };
+  });
+}
+
+describe('rewriteImportPreds (predecessor remap)', () => {
+  it('rewrites refs that are in the remap', () => {
+    const remap = new Map([['P9-T1', 'P1-T3']]);
+    const nodes = [{ id: 'P1-T4', predecessors: 'P9-T1' }];
+    const out = rewriteImportPreds(remap, nodes);
+    assert.equal(out[0].predecessors, 'P1-T3');
+  });
+
+  it('preserves refs not in the remap (refs out of the imported set)', () => {
+    const remap = new Map([['P9-T1', 'P1-T3']]);
+    const nodes = [{ id: 'P1-T4', predecessors: 'P9-T1, P2-T7' }];
+    const out = rewriteImportPreds(remap, nodes);
+    assert.equal(out[0].predecessors, 'P1-T3, P2-T7');
+  });
+
+  it('handles empty / null predecessors', () => {
+    const remap = new Map([['P9-T1', 'P1-T3']]);
+    const nodes = [{ id: 'A', predecessors: '' }, { id: 'B', predecessors: undefined }];
+    const out = rewriteImportPreds(remap, nodes);
+    assert.equal(out[0].predecessors, '');
+    assert.equal(out[1].predecessors, undefined);
+  });
+});
