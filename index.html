@@ -1201,6 +1201,9 @@ Click ⓘ in the header for the full list of things I can do.</div>
         version:      r.version != null ? Number(r.version) : 1,
         collapsed: false,
       }));
+      if (typeof window.migrateLegacyFields === "function") {
+        window.migrateLegacyFields(nodes);
+      }
       if (typeof window.replaceNodes === "function") window.replaceNodes(nodes);
     }
 
@@ -3139,6 +3142,7 @@ Phase                                Dur (d)   Predecessor
       NODES   = (EMBEDDED.nodes || []).slice();
       SOURCE  = { file: EMBEDDED.source_file || '', title: EMBEDDED.title || 'Project Gantt' };
     }
+    migrateLegacyFields(NODES);
     document.getElementById('titleText').textContent = SOURCE.title || 'Project Gantt';
     document.getElementById('sourceLabel').textContent = SOURCE.file ? `Source: ${SOURCE.file}` : 'Started from scratch';
     renderLegend();
@@ -3216,6 +3220,36 @@ Phase                                Dur (d)   Predecessor
     const s = eSlack(node);
     return isFinite(s) && s === 0;
   }
+
+  /* ── Legacy field migration ──
+     Older saved boards used est_cost / cost_to_date instead of the new
+     estimated_raw_cost / quoted_cost / actual_spend_to_date / committed_to_spend.
+     Copy old → new on load. Idempotent — subsequent saves write only new keys.
+     NOTE: legacy fields are NOT removed from existing saved boards on first load
+     — the shim only ADDS the new keys. Old keys drop out as nodes are edited. */
+  function migrateLegacyFields(nodes) {
+    for (const n of nodes) {
+      const parts = String(n.id || '').split('-');
+      const isProject = parts.length === 1;
+      const isSubtask = parts.length === 3;
+
+      if (isSubtask && (n.quoted_cost == null || n.quoted_cost === '')
+                    && n.est_cost != null && n.est_cost !== '') {
+        n.quoted_cost = n.est_cost;
+      }
+      if (isProject && (n.estimated_raw_cost == null || n.estimated_raw_cost === '')
+                    && n.est_cost != null && n.est_cost !== '') {
+        n.estimated_raw_cost = n.est_cost;
+      }
+      if ((n.actual_spend_to_date == null || n.actual_spend_to_date === '')
+          && n.cost_to_date != null && n.cost_to_date !== '') {
+        n.actual_spend_to_date = n.cost_to_date;
+      }
+      if (n.committed_to_spend == null) n.committed_to_spend = '';
+    }
+    return nodes;
+  }
+  window.migrateLegacyFields = migrateLegacyFields;
 
   /* ── Cost roll-up ──
      Parent rows display the sum of their children's effective values (recursive).
@@ -5869,6 +5903,9 @@ Phase                                Dur (d)   Predecessor
   let importState = null;  // { fileName, parsed, mapping, rows[], conflictMap }
 
   function openImportModal(fileName, importedNodes) {
+    // Migrate legacy fields BEFORE conflict detection so the new fields
+    // are populated before the user sees the import preview.
+    migrateLegacyFields(importedNodes);
     const conflicts = detectImportConflicts(importedNodes, NODES);
     const projects = importedNodes.filter(n => n.type === 'project');
     const taskCountByProj = new Map();
