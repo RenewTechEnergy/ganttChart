@@ -103,7 +103,8 @@
     .row-name.is-p { font-weight: 700; }
     .row-name.is-t { font-weight: 600; }
     .row-name.is-s { font-weight: 500; color: #4b5563; }
-    .row-meta { font-size: 10px; color: #9ca3af; margin-top: 1px; display: flex; gap: 8px; }
+    .row-meta { font-size: 10px; color: #9ca3af; margin-top: 1px; display: flex; gap: 6px 8px; flex-wrap: wrap; align-items: center; }
+    .row-status-pill { display: inline-block; color: white; padding: 1px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; white-space: nowrap; line-height: 1.5; flex-shrink: 0; }
 
     .row-timeline { flex: 1; position: relative; overflow: hidden; }
     .m-div { position: absolute; top: 0; bottom: 0; width: 1px; background: #f3f4f6; pointer-events: none; }
@@ -142,6 +143,10 @@
     .modal-section { margin-top: 12px; padding-top: 10px; border-top: 1px dashed #e5e7eb; }
     .modal-section-label { font-size: 10px; font-weight: 700; color: #9ca3af; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
     .modal-readonly input { background: #f9fafb; color: #6b7280; }
+    .fin-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; margin-right: 6px; text-transform: none; letter-spacing: 0; }
+    .fin-badge-proposal { background: #fce7f3; color: #be185d; }
+    .fin-badge-live     { background: #dbeafe; color: #1e40af; }
+    .fin-badge-end      { background: #d1fae5; color: #065f46; }
     .modal-actions { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; }
     .modal-actions .btn-del { margin-right: auto; }
 
@@ -191,10 +196,46 @@
     body.signed-out #sourceLabel,
     body.signed-out #filterPopup,
     body.signed-out #notesPanel,
-    body.signed-out .footer-bar { display: none !important; }
+    body.signed-out .footer-bar,
+    body.signed-out #auth-bar,
+    body.signed-out #logoHeader,
+    body.signed-out #footerLogo { display: none !important; }
     body.signed-out .signed-out-hint { display: block; }
-    .signed-out-hint { display: none; max-width: 480px; margin: 80px auto; padding: 24px 28px; text-align: center; color: #6b7280; background: white; border: 1px solid #e5e7eb; border-radius: 12px; font-size: 14px; line-height: 1.6; }
-    .signed-out-hint h2 { font-size: 16px; color: #111827; margin-bottom: 8px; }
+    body.signed-out { padding-top: 0; }
+    .signed-out-hint {
+      display: none;
+      position: fixed; inset: 0; height: fit-content; width: min(440px, calc(100% - 32px));
+      margin: auto;
+      padding: 28px 32px;
+      text-align: center;
+      color: #374151;
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      font-size: 14px;
+      line-height: 1.6;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+    }
+    .signed-out-hint h2 { font-size: 18px; color: #111827; margin-bottom: 8px; }
+    .card-auth-row { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
+    .card-auth-row input {
+      padding: 10px 12px; font-size: 14px; border: 1px solid #d1d5db;
+      border-radius: 6px; width: 100%; box-sizing: border-box;
+    }
+    .card-auth-row button {
+      padding: 10px 16px; font-size: 14px; font-weight: 600; border: none;
+      border-radius: 6px; cursor: pointer; background: #2563eb; color: white;
+    }
+    .card-auth-row button:hover { background: #1d4ed8; }
+    .card-auth-row button.secondary { background: #6b7280; }
+    .card-auth-awaiting-email { font-size: 13px; color: #6b7280; }
+    .card-auth-message {
+      margin-top: 12px; padding: 10px 12px; border-radius: 6px;
+      background: #fef3c7; color: #92400e; font-size: 13px;
+      line-height: 1.5; text-align: left;
+    }
+    .card-auth-message.error { background: #fee2e2; color: #991b1b; }
+    .card-auth-message.info  { background: #dbeafe; color: #1e40af; }
     body.readonly .btn-add-p,
     body.readonly .btn-add-t,
     body.readonly .btn-add-s,
@@ -212,6 +253,16 @@
     #aiToggleBtn:hover { background: #6d28d9; }
     body.signed-out #aiToggleBtn,
     body.signed-out #ai-panel { display: none !important; }
+    /* Chat content must be selectable so users can copy messages.
+       body { user-select: none } higher up the tree blocks selection
+       for the whole app — re-enable inside the chat scroll area only. */
+    #ai-panel .ai-log,
+    #ai-panel .ai-log *,
+    #ai-panel .ai-preview,
+    #ai-panel .ai-preview * {
+      user-select: text;
+      -webkit-user-select: text;
+    }
     #ai-panel {
       position: fixed; right: -460px; top: 56px; bottom: 0; width: 440px;
       background: white; border-left: 1px solid #e5e7eb; z-index: 9100;
@@ -365,10 +416,10 @@
       <button onclick="Supa.signIn(document.getElementById('auth-email').value)">Send code</button>
     </span>
 
-    <!-- State B: Code sent, awaiting 6-digit verification -->
+    <!-- State B: Code sent, awaiting 8-digit verification -->
     <span id="auth-awaiting" style="display:none;">
       <span id="auth-awaiting-email" style="opacity:0.7;"></span>
-      <input id="auth-code" type="text" inputmode="numeric" maxlength="10" placeholder="code"
+      <input id="auth-code" type="text" inputmode="numeric" maxlength="8" placeholder="8-digit code"
              style="width:140px; letter-spacing:3px; text-align:center; font-family:monospace;" />
       <button onclick="Supa.verifyCode(document.getElementById('auth-code').value)">Verify</button>
       <button onclick="Supa.cancelCode()" style="background:#6b7280;">Cancel</button>
@@ -381,10 +432,27 @@
     </span>
   </div>
 
-  <!-- Shown only when body.signed-out is set (i.e., no session). -->
-  <div class="signed-out-hint">
-    <h2>🔒 Sign in to view the board</h2>
-    <p>Enter your email above and we'll send you a 6-digit code. Once you're signed in your projects will load here.</p>
+  <!-- Shown only when body.signed-out is set (i.e., no session).
+       The auth bar at the top is hidden in that state; this card is the
+       sign-in surface so the "please sign in" prompt is visually centered. -->
+  <div class="signed-out-hint" role="dialog" aria-label="Sign in">
+    <h2>🔒 Please sign in</h2>
+    <p>Enter the email an admin invited you with — we'll send you a 8-digit code.</p>
+
+    <div id="card-auth-signin" class="card-auth-row">
+      <input id="card-auth-email" type="email" placeholder="you@example.com" autocomplete="email" />
+      <button onclick="Supa.cardSignIn()">Send code</button>
+    </div>
+
+    <div id="card-auth-awaiting" class="card-auth-row" style="display:none;">
+      <span id="card-auth-awaiting-email" class="card-auth-awaiting-email"></span>
+      <input id="card-auth-code" type="text" inputmode="numeric" maxlength="8" placeholder="8-digit code"
+             style="letter-spacing:3px; text-align:center; font-family:monospace;" />
+      <button onclick="Supa.cardVerifyCode()">Verify</button>
+      <button class="secondary" onclick="Supa.cardCancelCode()">Cancel</button>
+    </div>
+
+    <div id="card-auth-message" class="card-auth-message" style="display:none;"></div>
   </div>
 
   <!-- RenewTech header logo -->
@@ -436,8 +504,8 @@
       <button class="vt-btn"          data-mode="scheduled" onclick="setViewMode('scheduled')">🗓 Scheduled</button>
     </span>
     <button class="btn" id="todayBtn" style="background:#dc2626;color:white" onclick="focusToday()" title="Toggle focus on tasks currently in progress">🎯 Today's tasks</button>
-    <label style="font-size:11px; color:#374151; display:flex; align-items:center; gap:4px; margin-left:6px;" title="Clamp displayed slack to at most this many days. Leave empty for no cap.">
-      Max slack (d):
+    <label style="font-size:11px; color:#374151; display:flex; align-items:center; gap:4px; margin-left:6px;" title="Clamp displayed buffer to at most this many days. Leave empty for no cap.">
+      Max buffer (d):
       <input type="number" id="maxSlackCap" min="0" placeholder="∞"
              style="width:50px; padding:2px 4px; font-size:11px; border:1px solid #d1d5db; border-radius:4px;"
              onchange="onMaxSlackChange()">
@@ -448,7 +516,8 @@
     <button class="btn btn-save" id="saveBtn" onclick="manualCloudSave()" title="Push edits to Supabase now">💾 Save</button>
     <button class="btn btn-mine" id="mineBtn" onclick="toggleMineFilter()" title="Show only projects you can edit">👤 Mine</button>
     <button class="btn btn-users" id="usersBtn" onclick="openManageUsersModal()" title="Assign admin / user / viewer roles" style="display:none; background:#7c3aed; color:white;">⚙ Users</button>
-    <button class="btn btn-xlsx" onclick="exportCSV()" title="Download a CSV snapshot">📄 Export CSV</button>
+    <button class="btn btn-xlsx" onclick="exportCSV()" title="Download a CSV snapshot (full round-trip)">📄 Export CSV</button>
+    <button class="btn" style="background:#0ea5e9;color:white;" onclick="exportSummaryCSV()" title="Download a summary of the currently-visible rows (financial + status, suitable for sharing)">📊 Summary CSV</button>
     <button class="btn btn-reset" onclick="clearGantt()" title="Wipe every row from the chart (and from the cloud if signed in)">🗑 Clear</button>
     <button class="btn" style="background:#7c3aed;color:white;" onclick="recalcAll()" title="Optimise — ASAP compression: snap every task to its earliest possible start so the project finishes as soon as possible">🚀 Optimise</button>
     <button class="btn btn-add-p" onclick="openAdd('project')">+ Project</button>
@@ -512,13 +581,12 @@
       <div style="font-weight:700; color:#374151; margin-bottom:6px;">Notes</div>
       <div>• <b>Hierarchy:</b> Project (P) ▸ Task (P-T) ▸ Subtask (P-T-S). Edit subtask data; tasks and projects roll up automatically (earliest start, latest end, summed costs).</div>
       <div>• <b>Scheduled vs Actual:</b> <b>Scheduled</b> dates are the plan — set when a row is created and only changed by opening the edit modal. <b>Actual</b> dates track what really happened (or is happening). Dragging a bar shifts <b>actual</b> dates only; the schedule stays put as a baseline to measure delay against.</div>
-      <div>• <b>Predecessors:</b> comma-separated list of IDs that must finish before this one can start (Finish-to-Start). A subtask's <b>% Done</b> is locked at 0 until every predecessor reaches 100% — its rolled-up parents (task, project) also stay at 0 to reflect that no work can have begun yet.</div>
-      <div>• <b>Slack (days):</b> how many days a subtask can be delayed without delaying the project end. Slack = 0 → critical path (★).</div>
-      <div>• <b>Critical path:</b> the chain of subtasks with Slack = 0 (★). Any delay on these slips the project finish — focus management attention here.</div>
-      <div>• <b>Late Start vs Delay:</b> <i>Late Start</i> = scheduled start has passed but nothing has begun (no actual_start, 0%). <i>Delay / At Risk</i> = work has begun and we're past the scheduled end. They never apply at the same time.</div>
-      <div>• <b>% Done:</b> only editable on subtasks. A task's % Done is the est_cost-weighted average of its subtasks; a project's is the weighted average of its tasks. Edit a subtask and the rollup updates immediately. (Falls back to a simple average if no est_cost is set.)</div>
-      <div>• <b>Cost Variance =</b> Cost-to-Date − Estimated. Negative (under budget) is good; positive (over budget) is bad.</div>
-      <div>• <b>Margin =</b> Sale Price − Cost-to-Date. Costs and % Done roll up from subtasks; sale price is set on the project row only.</div>
+      <div>• <b>Predecessors:</b> comma-separated list of IDs that must finish before this one can start (Finish-to-Start). A subtask's status is locked at "Not Started" until every predecessor reaches "Done".</div>
+      <div>• <b>Buffer (days):</b> how many days a subtask can be delayed without delaying the project end. Buffer = 0 → critical path (★).</div>
+      <div>• <b>Critical path:</b> the chain of subtasks with Buffer = 0 (★). Any delay on these slips the project finish — focus management attention here.</div>
+      <div>• <b>Status:</b> only editable on subtasks. Pick one of Not Started / In Progress / Delayed / Done. Tasks and projects roll up by priority — <i>any Delayed → Delayed; else all Done → Done; else any Done or any In Progress → In Progress (work has begun); else Not Started</i>. Picking "Delayed" prompts for a new end date and reschedules downstream tasks.</div>
+      <div>• <b>Variance =</b> Quoted Cost − (Actual Spend + Committed). Negative means projected overrun.</div>
+      <div>• <b>Project Margin =</b> Sale Price − Estimated Raw Cost (proposal-stage). <b>Final Margin =</b> Sale Price − (Actual + Committed), locked when every subtask is Done.</div>
       <div>• <b>Row grouping:</b> use the ▾/▸ arrows next to project/task rows to collapse subtasks, or "⊟ Collapse" in the toolbar.</div>
       <div>• <b>Saving:</b> the CSV download is the session store — reload it next time by attaching the file and re-running the gantt-chart skill.</div>
     </div>
@@ -613,12 +681,81 @@ Click ⓘ in the header for the full list of things I can do.</div>
         <b>user</b> can edit projects they create or that are shared with them;
         <b>viewer</b> is read-only.
       </p>
+      <div style="border:1px solid #e5e7eb; border-radius:8px; padding:10px 12px; margin-bottom:10px; background:#f9fafb;">
+        <div style="font-weight:600; font-size:12px; color:#111827; margin-bottom:6px;">Invite a new user</div>
+        <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+          <input id="inviteEmail" type="email" placeholder="name@example.com"
+                 style="flex:1; min-width:220px; font-size:12px; padding:6px 10px;">
+          <select id="inviteRole" style="font-size:12px; padding:6px 8px;">
+            <option value="user" selected>user</option>
+            <option value="admin">admin</option>
+            <option value="viewer">viewer</option>
+          </select>
+          <button class="btn" id="inviteBtn" onclick="sendInvite()" style="background:#2563eb; color:white;">Invite</button>
+        </div>
+        <div id="inviteMessage" style="margin-top:6px; font-size:11px; display:none;"></div>
+      </div>
       <input id="usersSearch" type="text" placeholder="🔎 search by email…"
              style="width:100%; font-size:12px; padding:6px 10px; margin-bottom:8px;"
              oninput="renderUsersList()">
-      <div id="usersList" style="max-height:60vh; overflow:auto; border:1px solid #e5e7eb; border-radius:8px;"></div>
+      <div id="usersList" style="max-height:55vh; overflow:auto; border:1px solid #e5e7eb; border-radius:8px;"></div>
       <div class="modal-actions">
         <button class="btn btn-cancel" onclick="closeManageUsersModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Remove-user modal (admin only) — single-screen confirm w/ reassign picker -->
+  <div class="modal-overlay" id="removeUserModal" style="display:none" onclick="if(event.target===this)closeRemoveUserModal()">
+    <div class="modal" style="max-width:520px;">
+      <h3>🗑 Remove user</h3>
+      <div style="padding:10px 12px; background:#fef2f2; border:1px solid #fecaca; border-radius:8px; margin-bottom:10px; font-size:11px; color:#7f1d1d; line-height:1.5;">
+        ⚠ <b>This is irreversible.</b> <span id="ru-email" style="font-weight:600;"></span> will lose access immediately and all their owned projects must be reassigned to another user. To restore access, you'll need to re-invite them from scratch — their account will be recreated, but project ownership won't come back automatically.
+      </div>
+      <div id="ru-counts" style="font-size:12px; color:#374151; margin-bottom:10px;">Loading…</div>
+      <div id="ru-reassign-row" style="display:none; margin-bottom:10px;">
+        <label style="font-size:12px; color:#374151;">
+          Reassign their <span id="ru-owned-count">0</span> project(s) to:
+          <select id="ru-reassign-pick" style="margin-top:4px; font-size:12px; width:100%; padding:6px 8px;">
+            <option value="" disabled selected>— pick a user —</option>
+          </select>
+        </label>
+      </div>
+      <div id="ru-noone" style="display:none; padding:8px 10px; background:#fef3c7; border:1px solid #fde68a; border-radius:6px; font-size:11px; color:#92400e; margin-bottom:10px;">
+        ⚠ No one else to reassign these projects to. Invite another user first.
+      </div>
+      <div id="ru-error" style="display:none; padding:8px 10px; background:#fef2f2; border:1px solid #fecaca; border-radius:6px; font-size:11px; color:#7f1d1d; margin-bottom:10px;"></div>
+      <div class="modal-actions">
+        <button class="btn btn-cancel" onclick="closeRemoveUserModal()">Cancel</button>
+        <button class="btn btn-del" id="ru-confirm" onclick="confirmRemoveUser()" disabled>Remove user</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CSV import modal — picker + per-project conflict resolver -->
+  <div class="modal-overlay" id="importModal" style="display:none" onclick="if(event.target===this)closeImportModal()">
+    <div class="modal" style="max-width:720px;">
+      <h3 id="im-title">📥 Import from CSV</h3>
+      <div id="im-summary" style="font-size:11px; color:#6b7280; margin-bottom:10px;"></div>
+      <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:8px; font-size:11px;">
+        <button class="btn btn-cancel" style="padding:3px 8px;" onclick="imSelectAll(true)">Select all</button>
+        <button class="btn btn-cancel" style="padding:3px 8px;" onclick="imSelectAll(false)">Deselect all</button>
+        <span style="flex:1;"></span>
+        <label>Default conflicts to:
+          <select id="im-default-resolution" onchange="imApplyDefaultResolution(this.value)">
+            <option value="">— choose —</option>
+            <option value="new">Import as new</option>
+            <option value="keep">Keep mine</option>
+            <option value="overwrite">Overwrite mine</option>
+            <option value="merge">Merge</option>
+          </select>
+        </label>
+      </div>
+      <div id="im-rows" style="max-height:55vh; overflow:auto; border:1px solid #e5e7eb; border-radius:8px;"></div>
+      <div id="im-footer" style="font-size:12px; color:#374151; margin-top:10px;"></div>
+      <div class="modal-actions">
+        <button class="btn btn-cancel" onclick="closeImportModal()">Cancel</button>
+        <button class="btn btn-ok" id="im-confirm" onclick="confirmImport()" disabled>Import</button>
       </div>
     </div>
   </div>
@@ -627,6 +764,11 @@ Click ⓘ in the header for the full list of things I can do.</div>
   <div class="modal-overlay" id="modal" style="display:none" onclick="if(event.target===this)closeModal()">
     <div class="modal">
       <h3 id="modalTitle">Edit Row</h3>
+      <div id="m-project-row" style="display:none; margin-bottom:9px;">
+        <label>Project <span style="font-weight:400; color:#9ca3af;">— which project this subtask belongs to</span>
+          <select id="m-project"></select>
+        </label>
+      </div>
       <div id="m-parent-row" style="display:none; margin-bottom:9px;">
         <label>Parent <span style="font-weight:400; color:#9ca3af;">— pick which project/task this row goes under</span>
           <select id="m-parent"></select>
@@ -643,6 +785,36 @@ Click ⓘ in the header for the full list of things I can do.</div>
         </label>
       </div>
       <label>Project / Task / Subtask name<input id="m-name" type="text" placeholder="e.g. 100kW Rooftop Solar"></label>
+
+      <!-- Project-only meta block: RTB code becomes the displayed label;
+           type / sector / installer help downstream SOW selection. -->
+      <div class="modal-section" id="m-project-meta" style="display:none;">
+        <div class="modal-section-label">Project meta</div>
+        <div class="modal-grid">
+          <label>RTB Code <span style="font-weight:400;color:#9ca3af;">— e.g. 2026-pepes ducks mulgrave 1</span>
+            <input id="m-rtb-code" type="text" placeholder="manually entered"></label>
+          <label>Installer Name<input id="m-installer-name" type="text" placeholder="(optional)"></label>
+        </div>
+        <div class="modal-grid">
+          <label>Type of Project
+            <select id="m-project-type">
+              <option value="">—</option>
+              <option value="Solar only">Solar only</option>
+              <option value="Solar and BESS">Solar and BESS</option>
+              <option value="BESS only">BESS only</option>
+              <option value="Heat pump">Heat pump</option>
+            </select>
+          </label>
+          <label>Sector
+            <select id="m-sector">
+              <option value="">—</option>
+              <option value="Residential">Residential</option>
+              <option value="Commercial">Commercial</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
       <div class="modal-grid">
         <label>Owner<input id="m-owner" type="text" placeholder="e.g. Jack Z"></label>
         <div id="m-predecessors-row">
@@ -674,36 +846,72 @@ Click ⓘ in the header for the full list of things I can do.</div>
       <div class="modal-section">
         <div class="modal-section-label">Progress</div>
         <div class="modal-grid">
-          <label>Slack (days)<input id="m-slack" type="number" step="1" placeholder="e.g. 3"></label>
-          <label>% Done<input id="m-percent-done" type="number" min="0" max="100" step="1" placeholder="0-100"></label>
+          <label>Buffer (days)<input id="m-slack" type="number" step="1" placeholder="e.g. 3"></label>
+          <label>Status
+            <select id="m-status">
+              <option value="Not Started">Not Started</option>
+              <option value="In Progress">In Progress</option>
+              <option value="Delayed">Delayed</option>
+              <option value="Done">Done</option>
+            </select>
+          </label>
         </div>
+        <div id="m-status-note" style="font-size:11px; color:#6b7280; margin-top:6px; display:none;"></div>
       </div>
 
-      <div class="modal-section">
-        <div class="modal-section-label">Costs &amp; budget</div>
-        <div id="m-rollup-notice" style="display:none; font-size:11px; color:#92400e; background:#fef3c7; padding:6px 10px; border-radius:6px; margin-bottom:8px;">
-          ⌃ This row has children — costs below show the rolled-up sum and can't be edited directly. Edit subtasks to change them.
-        </div>
-        <div class="modal-grid">
-          <label>Estimated Cost ($) <span style="font-weight:400; color:#9ca3af;">— this is your budget</span><input id="m-est-cost" type="number" step="0.01" placeholder="0.00"></label>
-          <label>Cost to Date ($)<input id="m-cost-date" type="number" step="0.01" placeholder="0.00"></label>
-        </div>
-        <div class="modal-grid">
-          <label class="modal-readonly">Cost Variance ($)<input id="m-cost-variance" type="number" step="0.01" readonly></label>
-          <label>&nbsp;</label>
-        </div>
-        <div id="m-budget-status" style="font-size:11px; padding:6px 10px; border-radius:6px; margin-top:6px; display:none;"></div>
-        <p style="font-size:10px;color:#9ca3af;margin-top:6px;">Cost Variance = Cost-to-Date − Estimated.  Estimated Cost is treated as the budget for the over/under indicator.</p>
+      <!-- ═════ Financial sections (lifecycle-grouped) ═════════════════════
+           Visibility rules applied by applyFinancialSectionVisibility():
+             • Project rows: show Proposal + Live + End-of-project
+             • Task    rows: show Live only (read-only, rolled up)
+             • Subtask rows: show Live only (editable on leaves)
+      -->
+      <div id="m-rollup-notice" style="display:none; font-size:11px; color:#92400e; background:#fef3c7; padding:6px 10px; border-radius:6px; margin-bottom:8px;">
+        ⌃ This row has children — dates and costs below show the rolled-up sum. Edit subtasks to change them.
       </div>
 
-      <!-- Project-only sale/margin section -->
-      <div class="modal-section" id="m-sale-section">
-        <div class="modal-section-label">Sale &amp; margin (projects only)</div>
+      <!-- Proposal stage — project only -->
+      <div class="modal-section" id="m-fin-proposal">
+        <div class="modal-section-label">
+          <span class="fin-badge fin-badge-proposal">Proposal stage</span>
+          <span style="font-weight:400;color:#9ca3af;font-size:11px;">— set once at start</span>
+        </div>
         <div class="modal-grid">
           <label>Sale Price ($)<input id="m-sale-price" type="number" step="0.01" placeholder="0.00"></label>
-          <label class="modal-readonly">Final Margin ($)<input id="m-margin" type="number" step="0.01" readonly></label>
+          <label>Estimated Raw Cost ($)<input id="m-estimated-raw-cost" type="number" step="0.01" placeholder="0.00"></label>
         </div>
-        <p style="font-size:10px;color:#9ca3af;margin-top:4px;">Final Margin = Sale Price − Cost to Date (rolled up from all subtasks).</p>
+        <div class="modal-grid">
+          <label class="modal-readonly">Project Margin ($)<input id="m-project-margin" type="number" step="0.01" readonly></label>
+          <label>&nbsp;</label>
+        </div>
+      </div>
+
+      <!-- Live (rolled up) — visible at every level; editable only on subtask leaves -->
+      <div class="modal-section" id="m-fin-live">
+        <div class="modal-section-label">
+          <span class="fin-badge fin-badge-live">Live</span>
+          <span id="m-fin-live-hint" style="font-weight:400;color:#9ca3af;font-size:11px;"></span>
+        </div>
+        <div class="modal-grid">
+          <label>Quoted Cost ($)<input id="m-quoted-cost" type="number" step="0.01" placeholder="0.00"></label>
+          <label>Actual Spend to Date ($)<input id="m-actual-spend" type="number" step="0.01" placeholder="0.00"></label>
+        </div>
+        <div class="modal-grid">
+          <label>Committed to Spend ($)<input id="m-committed" type="number" step="0.01" placeholder="0.00"></label>
+          <label class="modal-readonly">Variance ($)<input id="m-variance" type="number" step="0.01" readonly></label>
+        </div>
+        <p style="font-size:10px;color:#9ca3af;margin-top:6px;">Variance = Quoted Cost − (Actual Spend + Committed). Negative means projected overrun.</p>
+      </div>
+
+      <!-- End of project — project only -->
+      <div class="modal-section" id="m-fin-end">
+        <div class="modal-section-label">
+          <span class="fin-badge fin-badge-end">End of project</span>
+          <span style="font-weight:400;color:#9ca3af;font-size:11px;">— locks when every subtask is Done</span>
+        </div>
+        <div class="modal-grid">
+          <label class="modal-readonly">Final Margin ($)<input id="m-final-margin" type="number" step="0.01" readonly></label>
+          <label>&nbsp;</label>
+        </div>
       </div>
 
       <!-- Sharing — shown only when editing a project the current user owns (or admin). -->
@@ -762,12 +970,291 @@ Click ⓘ in the header for the full list of things I can do.</div>
   <div class="drag-tip" id="dragTip"></div>
   <div class="tip" id="tip"></div>
 
-  <!-- Load the full CPM scheduler (ES module) and expose it on window.
-       Module scripts are deferred, so window.Scheduler is defined before any
-       user-triggered handler (e.g. Load-from-template) needs it. -->
-  <script type="module">
-    import * as Scheduler from './scripts/scheduler.js';
-    window.Scheduler = Scheduler;
+  <!-- Inline CPM scheduler — was an ES module import of scripts/scheduler.js,
+       but file:// blocks module imports for security. Inlined so Load-from-Template
+       works regardless of how index.html is opened. Source of truth remains
+       scripts/scheduler.js (also scripts/scheduler.py for the original algorithm);
+       if you edit one, keep the others in sync.
+       Exposes window.Scheduler = { parsePredecessor, schedule, ... }. -->
+  <script>
+  (function () {
+    // ===== BEGIN inlined scripts/scheduler.js =====
+    // ============================================================
+    // Scheduler — CPM with DP forward/backward passes
+    // JS port of scripts/scheduler.py. Same algorithm, same result shape.
+    //   • Edge types: FS (default), SS, FF, with integer lag/lead in days
+    //   • Forward pass → ES/EF, Backward pass → LS/LF
+    //   • slack, critical path, infeasibility detection
+    //   • Working-day calendar projection (skips Sat/Sun + optional holiday set)
+    //   • Incremental recompute when one task's duration changes
+    // ============================================================
+
+    // ───────────────────── Predecessor string parser ─────────────────────
+    // "T1" → FS+0   "T1+14" → FS+14   "T1SS+5" → SS+5   "T1FF-2" → FF-2
+    const PRED_RE = /^([\w.\-]+)(FS|SS|FF)?([+-]\d+)?$/;
+
+    function parsePredecessor(s) {
+      const m = PRED_RE.exec(String(s).trim());
+      if (!m) throw new Error(`Cannot parse predecessor: ${JSON.stringify(s)}`);
+      return { predId: m[1], type: m[2] || "FS", lag: m[3] ? parseInt(m[3], 10) : 0 };
+    }
+
+    // ───────────────────────── Graph construction ─────────────────────────
+    function buildGraph(tasks) {
+      const byId = new Map(tasks.map(t => [t.id, t]));
+      const successors = new Map();   // id → [{ id, edge }]
+      const predecessors = new Map(); // id → [edge]
+      for (const t of tasks) {
+        if (t.duration < 0) throw new Error(`Task ${t.id} has negative duration ${t.duration}`);
+        successors.set(t.id, []);
+        predecessors.set(t.id, []);
+      }
+      for (const t of tasks) {
+        for (const raw of (t.predecessors || [])) {
+          const e = parsePredecessor(raw);
+          if (!byId.has(e.predId))
+            throw new Error(`Task ${t.id} references unknown predecessor ${e.predId}`);
+          predecessors.get(t.id).push(e);
+          successors.get(e.predId).push({ id: t.id, edge: e });
+        }
+      }
+      return { successors, predecessors };
+    }
+
+    // ───────────────── Topological sort + cycle detection ─────────────────
+    class CycleError extends Error {}
+
+    function topoSort(tasks, successors, predecessors) {
+      const inDeg = new Map(tasks.map(t => [t.id, predecessors.get(t.id).length]));
+      const queue = tasks.filter(t => inDeg.get(t.id) === 0).map(t => t.id);
+      const order = [];
+      while (queue.length) {
+        const u = queue.shift();
+        order.push(u);
+        for (const { id: v } of successors.get(u)) {
+          inDeg.set(v, inDeg.get(v) - 1);
+          if (inDeg.get(v) === 0) queue.push(v);
+        }
+      }
+      if (order.length < tasks.length) {
+        const cyc = findCycleDFS(tasks, successors);
+        throw new CycleError(`Cycle detected: ${cyc.join(" → ")}`);
+      }
+      return order;
+    }
+
+    function findCycleDFS(tasks, successors) {
+      const WHITE = 0, GRAY = 1, BLACK = 2;
+      const color = new Map(tasks.map(t => [t.id, WHITE]));
+      const parent = new Map(tasks.map(t => [t.id, null]));
+      function dfs(u) {
+        color.set(u, GRAY);
+        for (const { id: v } of (successors.get(u) || [])) {
+          if (color.get(v) === GRAY) {
+            const path = [v, u];
+            let node = parent.get(u);
+            while (node && node !== v) { path.push(node); node = parent.get(node); }
+            path.push(v);
+            return path.reverse();
+          }
+          if (color.get(v) === WHITE) {
+            parent.set(v, u);
+            const cyc = dfs(v);
+            if (cyc) return cyc;
+          }
+        }
+        color.set(u, BLACK);
+        return null;
+      }
+      for (const t of tasks) {
+        if (color.get(t.id) === WHITE) {
+          const cyc = dfs(t.id);
+          if (cyc) return cyc;
+        }
+      }
+      return ["?"];
+    }
+
+    // ───────────────────────── Forward pass ─────────────────────────
+    function forwardPass(order, tasksById, predecessors) {
+      const ES = {}, EF = {};
+      for (const u of order) {
+        const d = tasksById.get(u).duration;
+        const preds = predecessors.get(u);
+        if (!preds.length) {
+          ES[u] = 0;
+        } else {
+          const cands = preds.map(e => {
+            if (e.type === "FS") return EF[e.predId] + e.lag;
+            if (e.type === "SS") return ES[e.predId] + e.lag;
+            if (e.type === "FF") return EF[e.predId] + e.lag - d;
+            throw new Error(`Unknown edge type: ${e.type}`);
+          });
+          ES[u] = Math.max(...cands);
+        }
+        EF[u] = ES[u] + d;
+      }
+      const T = order.length ? Math.max(...Object.values(EF)) : 0;
+      return { ES, EF, T };
+    }
+
+    // ───────────────────────── Backward pass ─────────────────────────
+    function backwardPass(order, tasksById, successors, T, deadline = null) {
+      const horizon = deadline ?? T;
+      const LS = {}, LF = {};
+      for (let i = order.length - 1; i >= 0; i--) {
+        const u = order[i];
+        const d = tasksById.get(u).duration;
+        const outs = successors.get(u);
+        if (!outs.length) {
+          LF[u] = horizon;
+        } else {
+          const cands = outs.map(({ id: v, edge: e }) => {
+            if (e.type === "FS") return LS[v] - e.lag;
+            if (e.type === "SS") return LS[v] - e.lag + d;
+            if (e.type === "FF") return LF[v] - e.lag;
+            throw new Error(`Unknown edge type: ${e.type}`);
+          });
+          LF[u] = Math.min(...cands);
+        }
+        LS[u] = LF[u] - d;
+      }
+      return { LS, LF };
+    }
+
+    // ───────────── Slack / critical path / infeasibility ─────────────
+    function analyse(tasks, ES, LS) {
+      const slack = {};
+      for (const t of tasks) slack[t.id] = LS[t.id] - ES[t.id];
+      return {
+        slack,
+        critical:   tasks.filter(t => slack[t.id] === 0).map(t => t.id),
+        infeasible: tasks.filter(t => slack[t.id] <   0).map(t => t.id),
+      };
+    }
+
+    // ───────────────────────── Calendar projection ─────────────────────────
+    const MS_PER_DAY = 86_400_000;
+
+    function isoDate(d) {
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+    }
+
+    function addDays(start, offset, workingOnly, holidays = null) {
+      if (!workingOnly) return new Date(start.getTime() + offset * MS_PER_DAY);
+      const set = holidays instanceof Set ? holidays : new Set(holidays || []);
+      let d = new Date(start);
+      let remaining = offset;
+      while (remaining > 0) {
+        d = new Date(d.getTime() + MS_PER_DAY);
+        const dow = d.getDay();   // 0=Sun, 6=Sat
+        if (dow !== 0 && dow !== 6 && !set.has(isoDate(d))) remaining -= 1;
+      }
+      return d;
+    }
+
+    function projectDates(offsets, start, workingOnly, holidays = null) {
+      const out = {};
+      for (const [u, n] of Object.entries(offsets)) {
+        out[u] = addDays(start, n, workingOnly, holidays);
+      }
+      return out;
+    }
+
+    // ───────────────────────── Top-level orchestration ─────────────────────────
+    function schedule(tasks, projectStart, {
+      workingDaysOnly = true,
+      holidays = null,
+      deadlineOffset = null,
+    } = {}) {
+      const tasksById = new Map(tasks.map(t => [t.id, t]));
+      const { successors, predecessors } = buildGraph(tasks);
+      const order = topoSort(tasks, successors, predecessors);
+      const { ES, EF, T } = forwardPass(order, tasksById, predecessors);
+      const { LS, LF } = backwardPass(order, tasksById, successors, T, deadlineOffset);
+      const { slack, critical, infeasible } = analyse(tasks, ES, LS);
+      return {
+        ES, EF, LS, LF, slack,
+        criticalPath: critical,
+        infeasibleTasks: infeasible,
+        projectSpanT: T,
+        schedStart: projectDates(ES, projectStart, workingDaysOnly, holidays),
+        schedEnd:   projectDates(EF, projectStart, workingDaysOnly, holidays),
+      };
+    }
+
+    // ───────────── Incremental recompute (one duration change) ─────────────
+    function forwardDescendants(startId, successors) {
+      const seen = new Set();
+      const q = [startId];
+      while (q.length) {
+        const u = q.shift();
+        for (const { id: v } of (successors.get(u) || [])) {
+          if (!seen.has(v)) { seen.add(v); q.push(v); }
+        }
+      }
+      return seen;
+    }
+
+    function recomputeAfterChange(tasks, changedId, newDuration, prev, projectStart, {
+      workingDaysOnly = true,
+      holidays = null,
+      deadlineOffset = null,
+    } = {}) {
+      const tasksById = new Map(tasks.map(t => [t.id, t]));
+      tasksById.get(changedId).duration = newDuration;   // mutate in place, matches Python
+
+      const { successors, predecessors } = buildGraph(tasks);
+      const order = topoSort(tasks, successors, predecessors);
+
+      const dirty = new Set([changedId, ...forwardDescendants(changedId, successors)]);
+      const subOrder = order.filter(u => dirty.has(u));
+
+      const ES = { ...prev.ES }, EF = { ...prev.EF };
+      for (const u of subOrder) {
+        const d = tasksById.get(u).duration;
+        const preds = predecessors.get(u);
+        if (!preds.length) {
+          ES[u] = 0;
+        } else {
+          const cands = preds.map(e => {
+            if (e.type === "FS") return EF[e.predId] + e.lag;
+            if (e.type === "SS") return ES[e.predId] + e.lag;
+            if (e.type === "FF") return EF[e.predId] + e.lag - d;
+            throw new Error(`Unknown edge type: ${e.type}`);
+          });
+          ES[u] = Math.max(...cands);
+        }
+        EF[u] = ES[u] + d;
+      }
+      const newT = Math.max(...Object.values(EF));
+
+      // Always re-run backward pass — duration change cascades into ancestor slack.
+      const { LS, LF } = backwardPass(order, tasksById, successors, newT, deadlineOffset);
+      const { slack, critical, infeasible } = analyse(tasks, ES, LS);
+
+      const moved = [...dirty].filter(u => EF[u] !== prev.EF[u]).sort();
+
+      return {
+        result: {
+          ES, EF, LS, LF, slack,
+          criticalPath: critical,
+          infeasibleTasks: infeasible,
+          projectSpanT: newT,
+          schedStart: projectDates(ES, projectStart, workingDaysOnly, holidays),
+          schedEnd:   projectDates(EF, projectStart, workingDaysOnly, holidays),
+        },
+        moved,
+      };
+    }
+    // ===== END inlined scripts/scheduler.js =====
+
+    window.Scheduler = {
+      parsePredecessor, buildGraph, topoSort, forwardPass, backwardPass,
+      analyse, addDays, projectDates, schedule, recomputeAfterChange,
+      CycleError,
+    };
+  })();
   </script>
 
   <!-- Supabase wiring: auth, role-aware load/save, cloud persistence.
@@ -866,14 +1353,67 @@ Click ⓘ in the header for the full list of things I can do.</div>
     let pendingEmail  = null;   // email we sent the OTP code to, awaiting verification
     let supaToken     = null;   // cached access_token — keeps the hot upsert path off supabase-js
 
-    // ─── Auth: email OTP code (6-digit) — no clickable link, no prefetch issues ───
+    function setCardMessage(text, kind) {
+      const el = document.getElementById("card-auth-message");
+      if (!el) return;
+      if (!text) { el.style.display = "none"; el.textContent = ""; return; }
+      el.textContent = text;
+      el.className = "card-auth-message" + (kind ? " " + kind : "");
+      el.style.display = "";
+    }
+
+    // Pre-OTP gate: ask the check-email edge function whether the email is
+    // (a) on our domain and (b) already in profiles. We don't fall back to
+    // calling signInWithOtp when the function is unreachable — that would
+    // re-open the very quota leak this guard exists to close.
+    async function checkEmailAllowed(email) {
+      const useLocal = SUPA_CONFIG.useLocalEdge === true;
+      const base   = useLocal ? SUPA_CONFIG.localFunctionsBase  : SUPA_CONFIG.supabaseUrl;
+      const apikey = useLocal ? SUPA_CONFIG.localPublishableKey : SUPA_CONFIG.publishableKey;
+      const url    = `${base}/functions/v1/check-email`;
+      try {
+        const res = await loggedFetch(url, {
+          method: "POST",
+          headers: {
+            "apikey": apikey,
+            "Authorization": `Bearer ${apikey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ email }),
+        });
+        if (!res.ok) return { allowed: false, reason: "lookup_failed" };
+        const j = await res.json().catch(() => ({}));
+        return { allowed: !!j.allowed };
+      } catch (e) {
+        console.warn("[Supa] check-email failed:", e?.message || e);
+        return { allowed: false, reason: "network" };
+      }
+    }
+
+    // ─── Auth: email OTP code (8-digit) — no clickable link, no prefetch issues ───
     async function signIn(email) {
-      if (!email || !email.includes("@")) { alert("Enter a valid email"); return; }
+      email = (email || "").trim().toLowerCase();
+      if (!email || !email.includes("@")) {
+        setCardMessage("Enter a valid email.", "error");
+        return;
+      }
+      setCardMessage("Checking…", "info");
+      const { allowed } = await checkEmailAllowed(email);
+      if (!allowed) {
+        setCardMessage("We don't have an account for that email yet — ask an admin to invite you.", "error");
+        return;
+      }
+      setCardMessage("", "");
       const { error } = await supabase.auth.signInWithOtp({ email });
-      if (error) { alert("Send code failed: " + error.message); return; }
+      if (error) { setCardMessage("Send code failed: " + error.message, "error"); return; }
       pendingEmail = email;
       renderAuthBar({ awaitingCode: true, email });
     }
+
+    // UI button wrappers — pull values from the centered card inputs.
+    function cardSignIn()    { signIn(document.getElementById("card-auth-email")?.value || ""); }
+    function cardVerifyCode(){ verifyCode(document.getElementById("card-auth-code")?.value || ""); }
+    function cardCancelCode(){ cancelCode(); setCardMessage("", ""); }
 
     async function verifyCode(code) {
       if (!pendingEmail) { alert("Send a code first"); return; }
@@ -1011,6 +1551,9 @@ Click ⓘ in the header for the full list of things I can do.</div>
         version:      r.version != null ? Number(r.version) : 1,
         collapsed: false,
       }));
+      if (typeof window.migrateLegacyFields === "function") {
+        window.migrateLegacyFields(nodes);
+      }
       if (typeof window.replaceNodes === "function") window.replaceNodes(nodes);
     }
 
@@ -1239,12 +1782,18 @@ Click ⓘ in the header for the full list of things I can do.</div>
       }
       console.log(`[Supa] plan: ${inserts.length} insert, ${updates.length} update, ${byId.size - inserts.length - updates.length} unchanged`);
 
-      // INSERTS — batched.
+      // INSERTS — batched. Stamp owner_user_id on every insert so RLS
+      // accepts the row and `refreshEditableProjects` finds it on the next
+      // refresh. We do NOT stamp on UPDATE: that would let any editor
+      // overwrite the original creator's ownership.
       if (inserts.length) {
+        const insertsWithOwner = currentUserId
+          ? inserts.map(r => ({ ...r, owner_user_id: currentUserId }))
+          : inserts;
         const res = await rawPostgrest(
           "POST",
           "/rest/v1/tasks",
-          inserts,
+          insertsWithOwner,
           "return=representation",
           `tasks.insert(${inserts.length})`
         );
@@ -1534,6 +2083,27 @@ Click ⓘ in the header for the full list of things I can do.</div>
       } else {
         status.textContent = "Not signed in";
         signin.style.display = "";
+      }
+
+      // Mirror state into the centered card (visible only when body.signed-out).
+      const cardSignin  = document.getElementById("card-auth-signin");
+      const cardAwait   = document.getElementById("card-auth-awaiting");
+      const cardAwaitEm = document.getElementById("card-auth-awaiting-email");
+      if (cardSignin && cardAwait) {
+        cardSignin.style.display = "none";
+        cardAwait.style.display  = "none";
+        if (role) {
+          // signed in — the card is hidden by the body.signed-out toggle.
+        } else if (awaitingCode) {
+          cardAwait.style.display = "flex";
+          if (cardAwaitEm) cardAwaitEm.textContent = `Code sent to ${email}`;
+          setTimeout(() => {
+            const inp = document.getElementById("card-auth-code");
+            if (inp) { inp.value = ""; inp.focus(); }
+          }, 50);
+        } else {
+          cardSignin.style.display = "flex";
+        }
       }
     }
 
@@ -1829,6 +2399,24 @@ Click ⓘ in the header for the full list of things I can do.</div>
       if (error) { console.error("[Supa] setUserRole failed", error); throw error; }
     }
 
+    // Counts used by the Remove user modal so the admin sees what they're
+    // about to nuke before confirming. Returns 0 on any error (modal will
+    // still let the deletion proceed; backend is authoritative).
+    async function countProjectsOwnedBy(userId) {
+      const { count, error } = await supabase
+        .from("tasks").select("id", { count: "exact", head: true })
+        .eq("owner_user_id", userId).is("parent_id", null);
+      if (error) { console.warn("[Supa] countProjectsOwnedBy failed", error); return 0; }
+      return count || 0;
+    }
+    async function countSharesFor(userId) {
+      const { count, error } = await supabase
+        .from("project_shares").select("project_id", { count: "exact", head: true })
+        .eq("shared_with", userId);
+      if (error) { console.warn("[Supa] countSharesFor failed", error); return 0; }
+      return count || 0;
+    }
+
     // Has this row id been seen on the server (i.e., synced to tasks)?
     function isInCloud(rowId) { return serverRows.has(rowId); }
 
@@ -1872,14 +2460,72 @@ Click ⓘ in the header for the full list of things I can do.</div>
       return await res.json();
     }
 
+    // ─── Admin: invite a brand-new user via the invite-user edge function ───
+    // Sends Supabase's built-in invite email + creates the profiles row in one
+    // round-trip. Caller must be signed in as an admin; the edge function
+    // re-validates the role on the server.
+    async function inviteUser(email, role) {
+      const useLocal = SUPA_CONFIG.useLocalEdge === true;
+      const base   = useLocal ? SUPA_CONFIG.localFunctionsBase  : SUPA_CONFIG.supabaseUrl;
+      const apikey = useLocal ? SUPA_CONFIG.localPublishableKey : SUPA_CONFIG.publishableKey;
+      const token  = supaToken || apikey;
+      const url    = `${base}/functions/v1/invite-user`;
+      const res = await loggedFetch(url, {
+        method: "POST",
+        headers: {
+          "apikey": apikey,
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email, role }),
+      });
+      const text = await res.text().catch(() => "");
+      if (!res.ok) {
+        let msg = text;
+        try { msg = JSON.parse(text)?.error || text; } catch (_) {}
+        throw new Error(msg || `HTTP ${res.status}`);
+      }
+      try { return JSON.parse(text); } catch { return { ok: true }; }
+    }
+
+    // ─── Admin: remove a user via the delete-user edge function ───
+    // Reassigns the user's owned projects to <reassignTo>, clears their
+    // shares, deletes their profile, and deletes their auth account.
+    // Returns { ok, reassigned_projects, removed_shares }. Throws on error.
+    async function deleteUser(userId, reassignTo) {
+      const useLocal = SUPA_CONFIG.useLocalEdge === true;
+      const base   = useLocal ? SUPA_CONFIG.localFunctionsBase  : SUPA_CONFIG.supabaseUrl;
+      const apikey = useLocal ? SUPA_CONFIG.localPublishableKey : SUPA_CONFIG.publishableKey;
+      const token  = supaToken || apikey;
+      const url    = `${base}/functions/v1/delete-user`;
+      const res = await loggedFetch(url, {
+        method: "POST",
+        headers: {
+          "apikey": apikey,
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ user_id: userId, reassign_to: reassignTo }),
+      });
+      const text = await res.text().catch(() => "");
+      if (!res.ok) {
+        let msg = text;
+        try { msg = JSON.parse(text)?.error || text; } catch (_) {}
+        throw new Error(msg || `HTTP ${res.status}`);
+      }
+      try { return JSON.parse(text); } catch { return { ok: true }; }
+    }
+
     window.Supa = {
       signIn, verifyCode, cancelCode, signOut, loadBoard,
+      cardSignIn, cardVerifyCode, cardCancelCode,
       queueUpsertAll, deleteRows, forceSave, forceSaveWith,
       // sharing
       lookupUserByEmail, listShares, addShare, updateShare, removeShare,
       fetchProjectOwner, refreshEditableProjects, isInCloud,
       // admin
-      listAllProfiles, setUserRole,
+      listAllProfiles, setUserRole, inviteUser, deleteUser,
+      countProjectsOwnedBy, countSharesFor,
       // ai
       invokeChat,
       // exposed for the share UI
@@ -2116,23 +2762,20 @@ Phase                                Dur (d)   Predecessor
     today:                  { color: '#FFE699', label: 'Today',                     desc: 'Week containing the status date.' },
   };
 
-  // Status colors used for bar fills in the HTML chart (derives from % Done + slack + dates)
+  // Status colors used for bar fills in the HTML chart.
+  // Driven by the new per-subtask `status` field; parents roll up by priority rule.
   const STATUS_COLORS = {
-    'Not Started': LEGEND.scheduled_non_critical.color,
-    'In Progress': LEGEND.scheduled_and_actual.color,
-    'Critical':    LEGEND.scheduled_critical.color,
-    'Late Start':  LEGEND.late_start.color,
-    'At Risk':     LEGEND.delay_overrun.color,
-    'Completed':   LEGEND.actual_progress.color,
+    'Not Started': '#9ca3af',
+    'In Progress': '#3b82f6',
+    'Delayed':     '#dc2626',
+    'Done':        '#16a34a',
   };
-  // Human-readable explanation of how each status is derived
+  // Human-readable explanation of each status
   const STATUS_MEANINGS = {
-    'Not Started': '% Done = 0 and scheduled start is still in the future. Nothing to worry about yet.',
-    'In Progress': 'Work has started (actual_start set, % Done > 0, < 100) and the row has slack — some buffer before it would delay the project.',
-    'Critical':    'Work has started and Slack = 0. Any delay will slip the project finish — focus management attention here.',
-    'Late Start':  'Scheduled start has passed but no actual work has begun (no actual_start, % Done = 0). The row is already behind plan.',
-    'At Risk':     'Work has started but the scheduled end has passed and % Done < 100 — the row is in delay/overrun.',
-    'Completed':   '% Done = 100. Work is finished.',
+    'Not Started': 'Work has not begun yet.',
+    'In Progress': 'Work is underway (actual_start set).',
+    'Delayed':     'A subtask was explicitly marked Delayed (its scheduled end was pushed out; downstream tasks shifted).',
+    'Done':        'Work is finished.',
   };
 
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -2613,7 +3256,11 @@ Phase                                Dur (d)   Predecessor
       sched_start: fmtDate(projStart), sched_end: fmtDate(projEnd),
       actual_start: fmtDate(projStart), actual_end: fmtDate(projEnd),
       slack: '', percent_done: 0,
-      est_cost: '', cost_to_date: '', sale_price: '',
+      // New financial model:
+      estimated_raw_cost: '', sale_price: '',
+      quoted_cost: '', actual_spend_to_date: '', committed_to_spend: '',
+      // Legacy fields (kept blank; shim handles older saved boards):
+      est_cost: '', cost_to_date: '',
       collapsed: false,
     });
 
@@ -2641,7 +3288,11 @@ Phase                                Dur (d)   Predecessor
         sched_start: fmtDate(tStart), sched_end: fmtDate(tEnd),
         actual_start: fmtDate(tStart), actual_end: fmtDate(tEnd),
         slack: '', percent_done: 0,
-        est_cost: '', cost_to_date: '', sale_price: '',
+        // New financial model:
+        estimated_raw_cost: '', sale_price: '',
+        quoted_cost: '', actual_spend_to_date: '', committed_to_spend: '',
+        // Legacy fields (kept blank):
+        est_cost: '', cost_to_date: '',
         collapsed: false,
       });
       tasksInPhase.forEach((t, si) => {
@@ -2656,7 +3307,12 @@ Phase                                Dur (d)   Predecessor
           actual_start: fmtDate(sStart), actual_end: fmtDate(sEnd),
           slack: String(result.slack[t.tid]),
           percent_done: 0,
-          est_cost: '', cost_to_date: '', sale_price: '',
+          status: 'Not Started',
+          // New financial model:
+          estimated_raw_cost: '', sale_price: '',
+          quoted_cost: '', actual_spend_to_date: '', committed_to_spend: '',
+          // Legacy fields (kept blank):
+          est_cost: '', cost_to_date: '',
           collapsed: false,
         });
       });
@@ -2846,6 +3502,7 @@ Phase                                Dur (d)   Predecessor
       NODES   = (EMBEDDED.nodes || []).slice();
       SOURCE  = { file: EMBEDDED.source_file || '', title: EMBEDDED.title || 'Project Gantt' };
     }
+    migrateLegacyFields(NODES);
     document.getElementById('titleText').textContent = SOURCE.title || 'Project Gantt';
     document.getElementById('sourceLabel').textContent = SOURCE.file ? `Source: ${SOURCE.file}` : 'Started from scratch';
     renderLegend();
@@ -2907,7 +3564,7 @@ Phase                                Dur (d)   Predecessor
     render();
     flashHint(MAX_SLACK_CAP == null
       ? 'Slack cap cleared'
-      : `Slack cap set to ${MAX_SLACK_CAP} day${MAX_SLACK_CAP===1?'':'s'}`);
+      : `Buffer cap set to ${MAX_SLACK_CAP} day${MAX_SLACK_CAP===1?'':'s'}`);
   }
 
   function eSlack(node) {
@@ -2924,6 +3581,52 @@ Phase                                Dur (d)   Predecessor
     return isFinite(s) && s === 0;
   }
 
+  /* ── Legacy field migration ──
+     Older saved boards used est_cost / cost_to_date instead of the new
+     estimated_raw_cost / quoted_cost / actual_spend_to_date / committed_to_spend.
+     Copy old → new on load. Idempotent — subsequent saves write only new keys.
+     NOTE: legacy fields are NOT removed from existing saved boards on first load
+     — the shim only ADDS the new keys. Old keys drop out as nodes are edited. */
+  function migrateLegacyFields(nodes) {
+    for (const n of nodes) {
+      const parts = String(n.id || '').split('-');
+      const isProject = parts.length === 1;
+      const isSubtask = parts.length === 3;
+
+      if (isSubtask && (n.quoted_cost == null || n.quoted_cost === '')
+                    && n.est_cost != null && n.est_cost !== '') {
+        n.quoted_cost = n.est_cost;
+      }
+      if (isProject && (n.estimated_raw_cost == null || n.estimated_raw_cost === '')
+                    && n.est_cost != null && n.est_cost !== '') {
+        n.estimated_raw_cost = n.est_cost;
+      }
+      if ((n.actual_spend_to_date == null || n.actual_spend_to_date === '')
+          && n.cost_to_date != null && n.cost_to_date !== '') {
+        n.actual_spend_to_date = n.cost_to_date;
+      }
+      if (n.committed_to_spend == null) n.committed_to_spend = '';
+
+      // Status enum migration: pct_done → status.
+      //   100  → 'Done'
+      //   >0   → 'In Progress'
+      //   0/empty → 'Not Started'
+      // Only applied to subtasks (status lives on leaves only; parents roll up).
+      if (isSubtask && (n.status == null || n.status === '')) {
+        const pd = Number(n.percent_done);
+        if (!isNaN(pd)) {
+          if      (pd >= 100) n.status = 'Done';
+          else if (pd >    0) n.status = 'In Progress';
+          else                n.status = 'Not Started';
+        } else {
+          n.status = 'Not Started';
+        }
+      }
+    }
+    return nodes;
+  }
+  window.migrateLegacyFields = migrateLegacyFields;
+
   /* ── Cost roll-up ──
      Parent rows display the sum of their children's effective values (recursive).
      A leaf row uses its own stored value. */
@@ -2938,11 +3641,19 @@ Phase                                Dur (d)   Predecessor
     }
     return kids.reduce((s, k) => s + getEffective(k, field), 0);
   }
-  // Convenience for displays — Estimated Cost is the budget baseline.
-  const eEst    = n => getEffective(n, 'est_cost');
-  const eSpent  = n => getEffective(n, 'cost_to_date');
+  // Convenience for displays. The new model uses three subtask-level fields
+  // (quoted_cost, actual_spend_to_date, committed_to_spend) that roll up to
+  // tasks and projects via getEffective. eEst/eSpent are kept as aliases so
+  // any untouched legacy display code (e.g. bar tinting fallbacks) keeps
+  // working until PR 2/3 rewrites those call sites.
+  const eQuoted    = n => getEffective(n, 'quoted_cost');
+  const eActual    = n => getEffective(n, 'actual_spend_to_date');
+  const eCommitted = n => getEffective(n, 'committed_to_spend');
+  const eEst       = eQuoted;
+  const eSpent     = eActual;
   // Sale Price lives only on project rows — don't roll up across hierarchy
-  const eSale = n => parseFloat(n.sale_price) || 0;
+  const eSale    = n => parseFloat(n.sale_price) || 0;
+  const eRawCost = n => parseFloat(n.estimated_raw_cost) || 0;
 
   /* ── % Done roll-up ──
      Leaves return their own stored value (clamped to 0–100).
@@ -3063,39 +3774,70 @@ Phase                                Dur (d)   Predecessor
   //   Critical    — work in progress on the critical path (slack = 0).
   //   In Progress — work in progress with slack > 0.
   //   Not Started — % done = 0 and scheduled start is still in the future.
+  /* Status derives from the explicit per-subtask `status` field.
+       • Subtask (leaf): returns its stored status (defaults to 'Not Started').
+       • Task / Project: priority-rule rollup of descendant subtasks:
+             any Delayed                       → 'Delayed'
+         else every subtask is Done            → 'Done'
+         else any Done OR any In Progress      → 'In Progress' (work has begun)
+         else                                  → 'Not Started'
+       A project with zero subtasks rolls up to 'Not Started'. */
   function computeStatus(node) {
-    const today = new Date(); today.setHours(0,0,0,0);
-    const pd = ePercentDone(node);
-    if (pd >= 100) return 'Completed';
-    // Use rolled-up dates so a parent's status reflects its earliest/latest child.
-    const rng = eDateRange(node);
-    const schedStart  = rng.schedStart  || node.sched_start;
-    const schedEnd    = rng.schedEnd    || node.sched_end;
-    const actualStart = rng.actualStart || node.actual_start;
-    if (isNaN(pd) || pd <= 0) {
-      if (schedStart && new Date(schedStart) < today) return 'Late Start';
-      return 'Not Started';
+    // Leaves return their own field.
+    const kids = childrenOf(node);
+    if (kids.length === 0) {
+      const s = node.status || 'Not Started';
+      return ['Not Started','In Progress','Delayed','Done'].includes(s) ? s : 'Not Started';
     }
-    // Work is in progress (pd > 0). If we're past the scheduled end, the row is delayed.
-    if (schedEnd && actualStart && new Date(schedEnd) < today) return 'At Risk';
-    return isCriticalPath(node) ? 'Critical' : 'In Progress';
+    // Collect subtask statuses across all descendants.
+    const subStatuses = [];
+    (function walk(n) {
+      for (const k of childrenOf(n)) {
+        if (childrenOf(k).length === 0) {
+          subStatuses.push(k.status || 'Not Started');
+        } else {
+          walk(k);
+        }
+      }
+    })(node);
+    if (subStatuses.length === 0)                                                       return 'Not Started';
+    if (subStatuses.includes('Delayed'))                                                return 'Delayed';
+    if (subStatuses.every(s => s === 'Done'))                                           return 'Done';
+    if (subStatuses.some(s => s === 'Done' || s === 'In Progress'))                     return 'In Progress';
+    return 'Not Started';
   }
-  // Cost Variance = Cost-to-Date − Estimated (uses rolled-up values for parents)
+  // Variance = quoted_cost − (actual_spend_to_date + committed_to_spend).
+  // Uses rolled-up values for parents. Returns '' when all three sources empty.
   function computeVariance(node) {
-    const est = eEst(node), ctd = eSpent(node);
-    if (!est && !ctd) return '';
-    return (ctd - est).toFixed(2);
+    const q = eQuoted(node), a = eActual(node), c = eCommitted(node);
+    if (!q && !a && !c) return '';
+    return (q - a - c).toFixed(2);
   }
-  // Margin: projects use Sale − Cost (profit). Tasks/subtasks use Est − Cost ("budget left").
+  // Project Margin (proposal-stage) = sale_price − estimated_raw_cost.
+  // Only meaningful at project level. Tasks/subtasks return ''.
+  function computeProjectMargin(node) {
+    if (typeFromId(node.id) !== 'project') return '';
+    const sp = eSale(node), rc = eRawCost(node);
+    if (!sp && !rc) return '';
+    return (sp - rc).toFixed(2);
+  }
+  // Final Margin (end-of-project, locked) = sale_price − (actual + committed).
+  // Returns '' until every subtask of this project has status === 'Done'.
+  function computeFinalMargin(node) {
+    if (typeFromId(node.id) !== 'project') return '';
+    const subs = NODES.filter(n =>
+      typeFromId(n.id) === 'subtask' && n.id.split('-')[0] === node.id
+    );
+    if (subs.length === 0) return '';
+    const allDone = subs.every(s => (s.status || 'Not Started') === 'Done');
+    if (!allDone) return '';
+    const sp = eSale(node), a = eActual(node), c = eCommitted(node);
+    if (!sp && !a && !c) return '';
+    return (sp - a - c).toFixed(2);
+  }
+  // Backwards-compat alias for any remaining `computeMargin` callers; remove in PR3 cleanup.
   function computeMargin(node) {
-    if (typeFromId(node.id) === 'project') {
-      const sp = eSale(node), ctd = eSpent(node);
-      if (!sp && !ctd) return '';
-      return (sp - ctd).toFixed(2);
-    }
-    const est = eEst(node), ctd = eSpent(node);
-    if (!est && !ctd) return '';
-    return (est - ctd).toFixed(2);
+    return computeProjectMargin(node) || '';
   }
   function colorFor(node) {
     return STATUS_COLORS[computeStatus(node)] || '#6b7280';
@@ -3447,41 +4189,43 @@ Phase                                Dur (d)   Predecessor
       if (useStart && useEnd) {
         const sp = pct(useStart), ep = pct(useEnd), w = Math.max(0.5, ep - sp);
         const color = colorFor(n);
-        const pd = ePercentDone(n);
-        const pdLabel = pd % 1 === 0 ? pd.toFixed(0) : pd.toFixed(1);
+        const barStatus = computeStatus(n);
+        // 'Done' bars get full white overlay coverage of nothing; others show some white fill.
+        const overlayPct = barStatus === 'Done' ? 0 : 100;
+        const idForBar = type === 'project' ? (n.rtb_code || n.id) : n.id;
         barsHtml += `
           <div class="g-bar is-${type[0]}" id="bar-${ri}" data-ri="${ri}" data-nodeidx="${nodeIdx}"
                style="left:${sp}%;width:${w}%;background:${color};"
                onmouseenter="tipShow(event,${nodeIdx})" onmouseleave="tipHide()">
-            <div class="progress-fill" style="width:${100 - pd}%; right:0; left:auto; background:rgba(255,255,255,.55);"></div>
+            <div class="progress-fill" style="width:${overlayPct}%; right:0; left:auto; background:rgba(255,255,255,.55);"></div>
             <div class="rh rh-left"  onmousedown="dragStart(event,'left',${ri},${nodeIdx})"></div>
-            <span class="bar-label">${esc(n.id)} · ${pdLabel}%</span>
+            <span class="bar-label">${esc(idForBar)} · ${esc(barStatus)}</span>
             <div class="rh rh-right" onmousedown="dragStart(event,'right',${ri},${nodeIdx})"></div>
           </div>`;
       }
 
       const ownerLabel = n.owner ? `👤 ${esc(n.owner)}` : '';
-      const pdEff      = ePercentDone(n);
-      const pdLabel    = `${pdEff % 1 === 0 ? pdEff.toFixed(0) : pdEff.toFixed(1)}% done${hasKids ? ' ⌃' : ''}`;
-      // Cost chips — Sale only on projects. Estimated Cost is the budget baseline.
-      const effEst  = eEst(n);
-      const effSpent= eSpent(n);
+      const statusLive = computeStatus(n);
       const isParent = childrenOf(n).length > 0;
-      const rollupTag = isParent ? ' <span style="font-size:8px;color:#9ca3af;">⌃</span>' : '';
+      const pdLabel = `<span class="row-status-pill" style="background:${STATUS_COLORS[statusLive]};">${esc(statusLive)}</span>${isParent ? ' <span style="font-size:8px;color:#9ca3af;">⌃</span>' : ''}`;
+
+      // Lifecycle chips — proposal margin on projects; rolled variance on every row.
       const costBits = [];
-      if (effEst)   costBits.push(`<span title="Estimated Cost / Budget${isParent ? ' (sum of children)' : ''}">Est ${fmtMoney(effEst)}${rollupTag}</span>`);
-      if (effSpent) costBits.push(`<span title="Cost to Date${isParent ? ' (sum of children)' : ''}" style="color:#6b7280;">Spent ${fmtMoney(effSpent)}${rollupTag}</span>`);
-      if (type === 'project' && n.sale_price) {
-        costBits.push(`<span title="Sale Price" style="color:#166534;">Sale ${fmtMoney(n.sale_price)}</span>`);
+      const fmt$ = v => '$' + Number(v).toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:0});
+      const rollupTag = isParent ? ' <span style="font-size:8px;color:#9ca3af;">⌃</span>' : '';
+      if (type === 'project') {
+        if (n.sale_price)         costBits.push(`<span title="Sale Price" style="color:#166534;">Sale ${fmt$(n.sale_price)}</span>`);
+        if (n.estimated_raw_cost) costBits.push(`<span title="Estimated Raw Cost (proposal)">Est ${fmt$(n.estimated_raw_cost)}</span>`);
       }
-      // Over/under budget pill — appears whenever Budget is set
-      const bStat = budgetStatus(n);
-      if (bStat) {
-        const overBg   = bStat.diff > 0 ? 'background:#fef2f2;color:#b91c1c;'
-                       : bStat.diff < 0 ? 'background:#f0fdf4;color:#166534;'
-                       :                  'background:#f3f4f6;color:#374151;';
-        const lbl = bStat.diff > 0 ? '↑ Over' : bStat.diff < 0 ? '↓ Under' : '= On';
-        costBits.push(`<span title="${esc(bStat.label)} by ${fmtMoney(Math.abs(bStat.diff))}" style="${overBg}padding:1px 5px;border-radius:4px;font-weight:600;">${lbl} ${fmtMoney(Math.abs(bStat.diff))}</span>`);
+      const q = eQuoted(n), a = eActual(n), c = eCommitted(n);
+      if (q) costBits.push(`<span title="Quoted Cost${isParent ? ' (sum of subtasks)' : ''}">Quoted ${fmt$(q)}${rollupTag}</span>`);
+      if (a) costBits.push(`<span title="Actual Spend to Date${isParent ? ' (sum of subtasks)' : ''}" style="color:#6b7280;">Actual ${fmt$(a)}${rollupTag}</span>`);
+      if (c) costBits.push(`<span title="Committed to Spend${isParent ? ' (sum of subtasks)' : ''}" style="color:#6b7280;">Committed ${fmt$(c)}${rollupTag}</span>`);
+      const variance = computeVariance(n);
+      if (variance !== '' && Number(variance) !== 0) {
+        const negative = Number(variance) < 0;
+        const bg = negative ? 'background:#fef2f2;color:#b91c1c;' : 'background:#f0fdf4;color:#166534;';
+        costBits.push(`<span title="Variance" style="${bg}padding:1px 5px;border-radius:4px;font-weight:600;">${negative ? '↑' : '↓'} Var ${fmt$(Math.abs(variance))}</span>`);
       }
       const costsHtml = costBits.length ? `<span style="display:flex;gap:8px;flex-wrap:wrap;">${costBits.join('')}</span>` : '';
 
@@ -3509,12 +4253,12 @@ Phase                                Dur (d)   Predecessor
                style="padding-left:${12 + indent}px;"
                onclick="setSelected(${nodeIdx}); openEdit(${nodeIdx})">
             ${collapseBtn}
-            <span class="row-id-badge ${type[0]}">${esc(n.id)}</span>
+            <span class="row-id-badge ${type[0]}">${esc(type === 'project' ? (n.rtb_code || `(no RTB) ${n.id}`) : n.id)}</span>
             <div class="row-text">
               <div class="row-name is-${type[0]}" title="${esc(n.name)}">${namePrefix}${esc(n.name || '(unnamed)')}</div>
               <div class="row-meta">
+                ${pdLabel}
                 ${ownerLabel ? `<span>${ownerLabel}</span>` : ''}
-                ${pdLabel ? `<span>${pdLabel}</span>` : ''}
               </div>
               ${costsHtml ? `<div class="row-meta" style="margin-top:2px;">${costsHtml}</div>` : ''}
               ${pasteBadge ? `<div class="row-meta" style="margin-top:2px;">${pasteBadge}</div>` : ''}
@@ -3983,6 +4727,7 @@ Phase                                Dur (d)   Predecessor
         <thead><tr style="background:#f9fafb; text-align:left;">
           <th style="padding:8px 10px;">Email</th>
           <th style="padding:8px 10px; width:140px;">Role</th>
+          <th style="padding:8px 10px; width:40px;"></th>
         </tr></thead>
         <tbody>
           ${rows.map(p => {
@@ -4000,11 +4745,48 @@ Phase                                Dur (d)   Predecessor
                     <option value="viewer" ${p.role === 'viewer' ? 'selected' : ''}>viewer</option>
                   </select>
                 </td>
+                <td style="padding:6px 10px; text-align:right;">
+                  ${isMe ? '' : `<button onclick="openRemoveUserModal('${esc(p.user_id)}')" title="Remove user" style="background:transparent; border:none; cursor:pointer; font-size:14px; color:#b91c1c; padding:2px 6px;">🗑</button>`}
+                </td>
               </tr>`;
           }).join('')}
         </tbody>
       </table>`;
   }
+  function setInviteMessage(text, kind) {
+    const el = document.getElementById('inviteMessage');
+    if (!el) return;
+    if (!text) { el.style.display = 'none'; el.textContent = ''; return; }
+    el.textContent = text;
+    el.style.color = kind === 'error' ? '#991b1b' : (kind === 'ok' ? '#166534' : '#6b7280');
+    el.style.display = '';
+  }
+
+  async function sendInvite() {
+    const role = window.Supa?.currentRole?.();
+    if (role !== 'admin') { flashHint('Admins only'); return; }
+    const email = (document.getElementById('inviteEmail').value || '').trim().toLowerCase();
+    const newRole = document.getElementById('inviteRole').value;
+    if (!email || !email.includes('@')) {
+      setInviteMessage('Enter a valid email address.', 'error');
+      return;
+    }
+    const btn = document.getElementById('inviteBtn');
+    btn.disabled = true;
+    setInviteMessage('Sending invite…');
+    try {
+      await window.Supa.inviteUser(email, newRole);
+      setInviteMessage(`Invite sent to ${email}.`, 'ok');
+      document.getElementById('inviteEmail').value = '';
+      _usersCache = await window.Supa.listAllProfiles();
+      renderUsersList();
+    } catch (e) {
+      setInviteMessage(e?.message || 'Invite failed.', 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
   async function changeUserRole(userId, role) {
     const me = window.Supa.currentUserId();
     if (userId === me && role !== 'admin') {
@@ -4022,6 +4804,120 @@ Phase                                Dur (d)   Predecessor
       flashHint('Update failed — check console');
       _usersCache = await window.Supa.listAllProfiles();
       renderUsersList();
+    }
+  }
+
+  // ── Remove user (admin only) ──
+  let _ruTarget = null;   // { user_id, email } of the user being removed
+
+  async function openRemoveUserModal(userId) {
+    const role = window.Supa?.currentRole?.();
+    if (role !== 'admin') { flashHint('Admins only'); return; }
+    const me = window.Supa.currentUserId();
+    if (userId === me) { flashHint("You can't remove yourself"); return; }
+
+    const target = _usersCache.find(p => p.user_id === userId);
+    if (!target) { flashHint('User not found'); return; }
+    _ruTarget = { user_id: userId, email: target.email || '(no email)' };
+
+    document.getElementById('ru-email').textContent = _ruTarget.email;
+    document.getElementById('ru-counts').textContent = 'Loading project + share counts…';
+    document.getElementById('ru-reassign-row').style.display = 'none';
+    document.getElementById('ru-noone').style.display = 'none';
+    document.getElementById('ru-error').style.display = 'none';
+    document.getElementById('ru-confirm').disabled = true;
+    document.getElementById('removeUserModal').style.display = 'flex';
+
+    // Fetch counts via the Supa wrapper (the bare supabase client is
+    // scoped inside the IIFE — only Supa.* is reachable from out here).
+    let ownedCount = 0, sharesCount = 0;
+    try {
+      ownedCount  = await window.Supa.countProjectsOwnedBy(userId);
+      sharesCount = await window.Supa.countSharesFor(userId);
+    } catch (e) {
+      console.warn('[ru] count fetch failed', e);
+    }
+    // Bail if the admin closed or switched targets while we were awaiting.
+    if (_ruTarget?.user_id !== userId) return;
+    _ruTarget.ownedCount = ownedCount;
+    document.getElementById('ru-counts').textContent =
+      `Owns ${ownedCount} project(s) · Has ${sharesCount} project share(s).`;
+    document.getElementById('ru-owned-count').textContent = String(ownedCount);
+
+    // Populate the reassign dropdown — every user in cache except the target.
+    const candidates = _usersCache
+      .filter(p => p.user_id !== userId)
+      .sort((a, b) => String(a.email || '').localeCompare(String(b.email || '')));
+    const sel = document.getElementById('ru-reassign-pick');
+    sel.innerHTML = '<option value="" disabled selected>— pick a user —</option>'
+      + candidates.map(p => `<option value="${esc(p.user_id)}">${esc(p.email || '(no email)')}</option>`).join('');
+    sel.onchange = () => {
+      document.getElementById('ru-confirm').disabled = !sel.value;
+    };
+
+    if (ownedCount > 0) {
+      if (!candidates.length) {
+        document.getElementById('ru-noone').style.display = '';
+        // Confirm stays disabled — there's no one to reassign to.
+      } else {
+        document.getElementById('ru-reassign-row').style.display = '';
+      }
+    } else {
+      // No owned projects → no reassign needed → enable the button immediately.
+      document.getElementById('ru-confirm').disabled = false;
+    }
+  }
+
+  function closeRemoveUserModal() {
+    document.getElementById('removeUserModal').style.display = 'none';
+    _ruTarget = null;
+  }
+
+  async function confirmRemoveUser() {
+    if (!_ruTarget) return;
+    const btn = document.getElementById('ru-confirm');
+    const errEl = document.getElementById('ru-error');
+    errEl.style.display = 'none';
+    btn.disabled = true;
+
+    // If owned-count > 0, require a selection. Otherwise pass through any
+    // admin id (the server enforces userId !== reassignTo too).
+    const ownedCount = _ruTarget.ownedCount || 0;
+    let reassignTo = document.getElementById('ru-reassign-pick').value;
+    if (!reassignTo) {
+      if (ownedCount > 0) {
+        errEl.textContent = 'Pick a user to reassign their projects to.';
+        errEl.style.display = '';
+        btn.disabled = false;
+        return;
+      }
+      // No projects to reassign — pass the current admin's own id; server
+      // will accept since the reassign is a no-op (zero rows updated).
+      reassignTo = window.Supa.currentUserId();
+      if (!reassignTo) {
+        errEl.textContent = 'Session expired. Sign in again before removing users.';
+        errEl.style.display = '';
+        btn.disabled = false;
+        return;
+      }
+    }
+
+    // Capture before the await — `_ruTarget` is nulled by closeRemoveUserModal()
+    // (and by the backdrop/Cancel click), so reading it after the await can
+    // throw if the admin cancels mid-flight.
+    const targetEmail = _ruTarget.email;
+    const targetUserId = _ruTarget.user_id;
+    try {
+      const out = await window.Supa.deleteUser(targetUserId, reassignTo);
+      const reassigned = out?.reassigned_projects ?? 0;
+      closeRemoveUserModal();
+      _usersCache = await window.Supa.listAllProfiles();
+      renderUsersList();
+      flashHint(`Removed ${targetEmail}${reassigned ? ` · reassigned ${reassigned} project(s)` : ''}`);
+    } catch (e) {
+      errEl.textContent = e?.message || 'Remove failed.';
+      errEl.style.display = '';
+      btn.disabled = false;
     }
   }
 
@@ -4070,6 +4966,62 @@ Phase                                Dur (d)   Predecessor
 
     // Mark the current state as saved — clear the "Unsaved edits" badge
     markSaved();
+  }
+
+  /* Summary CSV — one row per CURRENTLY-VISIBLE row, with rolled-up financials
+       and the new status column. Suitable for sharing/reporting. The existing
+       Export CSV (round-trip format) is left untouched. */
+  function exportSummaryCSV() {
+    const rows = visibleTree();
+    if (!rows.length) { alert('No visible rows to export.'); return; }
+    const csvField = v => {
+      if (v == null || v === '') return '';
+      const s = String(v);
+      return /[,"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    const headers = [
+      'Type','RTB Code','Name','Status','Sale Price','Estimated Raw Cost','Project Margin',
+      'Quoted Cost','Actual Spend to Date','Committed to Spend','Variance','Final Margin',
+      'Scheduled Start','Scheduled End',
+    ];
+    const num = (v) => (v === '' || v == null ? '' : Number(v).toFixed(2));
+    const lines = [headers.map(csvField).join(',')];
+    rows.forEach(n => {
+      const t = typeFromId(n.id);
+      const isParent = childrenOf(n).length > 0;
+      const rng = eDateRange(n);
+      const q = isParent ? eQuoted(n)    : (n.quoted_cost           === '' ? 0 : Number(n.quoted_cost)           || 0);
+      const a = isParent ? eActual(n)    : (n.actual_spend_to_date  === '' ? 0 : Number(n.actual_spend_to_date)  || 0);
+      const c = isParent ? eCommitted(n) : (n.committed_to_spend    === '' ? 0 : Number(n.committed_to_spend)    || 0);
+      const out = {
+        type:                t,
+        rtb_code:            t === 'project' ? (n.rtb_code || '') : '',
+        name:                n.name || '',
+        status:              computeStatus(n),
+        sale_price:          t === 'project' ? num(n.sale_price)         : '',
+        estimated_raw_cost:  t === 'project' ? num(n.estimated_raw_cost) : '',
+        project_margin:      t === 'project' ? computeProjectMargin(n) || '' : '',
+        quoted_cost:         q ? q.toFixed(2) : '',
+        actual_spend:        a ? a.toFixed(2) : '',
+        committed:           c ? c.toFixed(2) : '',
+        variance:            computeVariance(n),
+        final_margin:        t === 'project' ? (computeFinalMargin(n) || '') : '',
+        sched_start:         isParent ? (rng.schedStart || '') : (n.sched_start || ''),
+        sched_end:           isParent ? (rng.schedEnd   || '') : (n.sched_end   || ''),
+      };
+      lines.push([
+        out.type, out.rtb_code, out.name, out.status,
+        out.sale_price, out.estimated_raw_cost, out.project_margin,
+        out.quoted_cost, out.actual_spend, out.committed, out.variance, out.final_margin,
+        out.sched_start, out.sched_end,
+      ].map(csvField).join(','));
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `summary-${fmtDate(new Date())}.csv`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
 
   function markSaved() {
@@ -4245,72 +5197,62 @@ Phase                                Dur (d)   Predecessor
       }
       if (note) {
         if (MAX_SLACK_CAP != null && !isNaN(rawSlack) && rawSlack > MAX_SLACK_CAP) {
-          note.textContent = `Capped to ${MAX_SLACK_CAP} day${MAX_SLACK_CAP===1?'':'s'} by global Max-slack setting`;
+          note.textContent = `Capped to ${MAX_SLACK_CAP} day${MAX_SLACK_CAP===1?'':'s'} by global Max buffer setting`;
           note.style.display = '';
         } else {
           note.style.display = 'none';
         }
       }
     }
-    const pdInput = document.getElementById('m-percent-done');
-    // % Done lock states:
-    //   Parent      → derived from children (read-only, grey).
-    //   Leaf, gated → predecessors not yet 100% (read-only at 0, amber).
-    //   Leaf, free  → editable.
+    // ── Status dropdown ──
+    //   Subtask (leaf)  → editable; defaults to 'Not Started'.
+    //   Parent (task/project) → read-only; shows the priority-rule rollup of subtasks.
+    //   Predecessor gate → locked at 'Not Started' until every predecessor is Done.
     {
-      const idForPdCheck = n.id || '';
-      const isParentForPd = NODES.some(x => parentOf(x.id) === idForPdCheck && idForPdCheck);
+      const statusInput = document.getElementById('m-status');
+      const statusNote  = document.getElementById('m-status-note');
+      const idForCheck2 = n.id || '';
+      const isParentForStatus = NODES.some(x => parentOf(x.id) === idForCheck2 && idForCheck2);
+      statusNote.style.display = 'none';
+      statusNote.style.color = '#6b7280';
 
-      // Reuse / create the gate-explanation note element.
-      let gateNote = document.getElementById('m-pd-gate-note');
-      if (!gateNote) {
-        gateNote = document.createElement('div');
-        gateNote.id = 'm-pd-gate-note';
-        gateNote.style.cssText = 'font-size:10px; margin-top:2px;';
-        pdInput.parentNode.appendChild(gateNote);
-      }
-      gateNote.style.display = 'none';
-
-      if (isParentForPd) {
-        const pdEff = ePercentDone({ ...n, id: idForPdCheck });
-        pdInput.value = pdEff % 1 === 0 ? pdEff.toFixed(0) : pdEff.toFixed(1);
-        pdInput.readOnly = true;
-        pdInput.style.background = '#f9fafb';
-        pdInput.style.color = '#6b7280';
-      } else if (!predecessorsComplete({ ...n, id: idForPdCheck })) {
-        // Predecessor gate: lock at 0 until all predecessors finish.
-        pdInput.value = 0;
-        pdInput.readOnly = true;
-        pdInput.style.background = '#fef3c7';
-        pdInput.style.color = '#92400e';
-        gateNote.textContent = '🔒 Locked at 0 — predecessors must reach 100% before this can start.';
-        gateNote.style.color = '#92400e';
-        gateNote.style.display = '';
+      if (isParentForStatus) {
+        const rolled = computeStatus({ ...n, id: idForCheck2 });
+        statusInput.value = rolled;
+        statusInput.disabled = true;
+        statusNote.textContent = `Rolled up from subtasks: ${rolled}`;
+        statusNote.style.display = '';
+      } else if (!predecessorsComplete({ ...n, id: idForCheck2 })) {
+        statusInput.value = 'Not Started';
+        statusInput.disabled = true;
+        statusNote.textContent = '🔒 Locked — predecessors must reach Done before this can start.';
+        statusNote.style.color = '#92400e';
+        statusNote.style.display = '';
       } else {
-        pdInput.value = clampPercent(n.percent_done ?? '');
-        pdInput.readOnly = false;
-        pdInput.style.background = 'white';
-        pdInput.style.color = '#111827';
+        statusInput.value = n.status || 'Not Started';
+        statusInput.disabled = false;
       }
+      statusInput.onchange = () => handleStatusChange(idForCheck2);
     }
-    // Live-clamp on input so the user sees the value snap to range immediately
-    pdInput.oninput = () => {
-      const v = parseFloat(pdInput.value);
-      if (!isNaN(v)) {
-        if (v > 100) pdInput.value = 100;
-        if (v < 0)   pdInput.value = 0;
-      }
-    };
 
     const idForCheck = n.id || '';
     const rowType = typeFromId(idForCheck) || 'project';
     const isProject = rowType === 'project';
     const isParent = NODES.some(x => parentOf(x.id) === idForCheck && idForCheck);
     const notice = document.getElementById('m-rollup-notice');
-    const saleSection = document.getElementById('m-sale-section');
 
-    // Sale/margin section is only relevant for projects
-    saleSection.style.display = isProject ? '' : 'none';
+    // Project-meta block (RTB code, type, sector, installer) — projects only.
+    const projectMetaEl = document.getElementById('m-project-meta');
+    if (projectMetaEl) projectMetaEl.style.display = isProject ? '' : 'none';
+    if (isProject) {
+      document.getElementById('m-rtb-code').value       = n.rtb_code       || '';
+      document.getElementById('m-installer-name').value = n.installer_name || '';
+      document.getElementById('m-project-type').value   = n.project_type   || '';
+      document.getElementById('m-sector').value         = n.sector         || '';
+    }
+
+    // Lifecycle-grouped financial sections — show/hide per row type.
+    applyFinancialSectionVisibility(rowType, isParent);
 
     // Sharing section: visible only when editing an EXISTING project row that
     // the current user owns (or is admin). Hidden for tasks/subtasks and for
@@ -4341,25 +5283,9 @@ Phase                                Dur (d)   Predecessor
       }
     }
 
+    // ── Date editability (cost fields are handled by applyFinancialSectionVisibility) ──
     if (isParent) {
       const tempNode = { ...n, id: idForCheck };
-      document.getElementById('m-est-cost').value   = eEst(tempNode).toFixed(2);
-      document.getElementById('m-cost-date').value  = eSpent(tempNode).toFixed(2);
-      // Sale Price is NOT rolled up — it stays manual on the project row
-      document.getElementById('m-sale-price').value = n.sale_price ?? '';
-      ['m-est-cost','m-cost-date'].forEach(id => {
-        const el = document.getElementById(id);
-        el.readOnly = true;
-        el.style.background = '#f9fafb';
-        el.style.color = '#6b7280';
-      });
-      // Sale Price stays editable for projects even when they have child tasks
-      const saleEl = document.getElementById('m-sale-price');
-      saleEl.readOnly = false;
-      saleEl.style.background = 'white';
-      saleEl.style.color = '#111827';
-
-      // Dates roll up from descendants — show the computed values and lock the fields
       const range = eDateRange(tempNode);
       document.getElementById('m-sched-start').value  = range.schedStart;
       document.getElementById('m-sched-end').value    = range.schedEnd;
@@ -4374,16 +5300,6 @@ Phase                                Dur (d)   Predecessor
       notice.innerHTML = '⌃ This row has children — dates and costs roll up from them. Edit a subtask to change them.';
       notice.style.display = '';
     } else {
-      document.getElementById('m-est-cost').value   = n.est_cost ?? '';
-      document.getElementById('m-cost-date').value  = n.cost_to_date ?? '';
-      document.getElementById('m-sale-price').value = n.sale_price ?? '';
-      ['m-est-cost','m-cost-date','m-sale-price'].forEach(id => {
-        const el = document.getElementById(id);
-        el.readOnly = false;
-        el.style.background = 'white';
-        el.style.color = '#111827';
-      });
-      // Dates editable on leaves
       ['m-sched-start','m-sched-end','m-actual-start','m-actual-end'].forEach(id => {
         const el = document.getElementById(id);
         el.readOnly = false;
@@ -4393,15 +5309,41 @@ Phase                                Dur (d)   Predecessor
       notice.style.display = 'none';
     }
 
+    // ── Populate financial fields (new model) ──
+    {
+      const tempNode = { ...n, id: idForCheck };
+      if (rowType === 'project') {
+        document.getElementById('m-sale-price').value         = n.sale_price ?? '';
+        document.getElementById('m-estimated-raw-cost').value = n.estimated_raw_cost ?? '';
+        document.getElementById('m-project-margin').value     = computeProjectMargin(tempNode);
+        document.getElementById('m-final-margin').value       = computeFinalMargin(tempNode);
+      }
+      // Live fields — rolled-up for parents, stored for leaves. For parents
+      // we hide a true 0 sum (matching spec: missing inputs show blank, not $0).
+      if (isParent) {
+        const q = eQuoted(tempNode), a = eActual(tempNode), c = eCommitted(tempNode);
+        document.getElementById('m-quoted-cost').value  = q ? q.toFixed(2) : '';
+        document.getElementById('m-actual-spend').value = a ? a.toFixed(2) : '';
+        document.getElementById('m-committed').value    = c ? c.toFixed(2) : '';
+      } else {
+        document.getElementById('m-quoted-cost').value  = n.quoted_cost ?? '';
+        document.getElementById('m-actual-spend').value = n.actual_spend_to_date ?? '';
+        document.getElementById('m-committed').value    = n.committed_to_spend ?? '';
+      }
+      document.getElementById('m-variance').value       = computeVariance(tempNode);
+    }
+
     // Predecessors are only meaningful on subtasks (the leaves)
     const isSubtask = rowType === 'subtask';
     const predRow = document.getElementById('m-predecessors-row');
     if (predRow) predRow.style.display = isSubtask ? '' : 'none';
 
     refreshComputedFields();
-    document.getElementById('m-est-cost').oninput   = refreshComputedFields;
-    document.getElementById('m-cost-date').oninput  = refreshComputedFields;
-    document.getElementById('m-sale-price').oninput = refreshComputedFields;
+    ['m-sale-price','m-estimated-raw-cost','m-quoted-cost','m-actual-spend','m-committed']
+      .forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.oninput = refreshComputedFields;
+      });
 
     // ── Edit gate ──
     // For existing rows (modalIdx >= 0): if the user can't edit this row's
@@ -4641,35 +5583,20 @@ Phase                                Dur (d)   Predecessor
     } catch (_) { flashHint('Revoke failed'); }
   }
 
+  /* Live-recompute project_margin (sale − estimated raw cost) and variance
+     (quoted − actual − committed) as the user types. Final margin depends on
+     subtask states and only refreshes when openEdit re-populates the modal. */
   function refreshComputedFields() {
-    const est = parseFloat(document.getElementById('m-est-cost').value);
-    const ctd = parseFloat(document.getElementById('m-cost-date').value);
-    const sp  = parseFloat(document.getElementById('m-sale-price').value);
+    const sp = parseFloat(document.getElementById('m-sale-price')?.value)         || 0;
+    const rc = parseFloat(document.getElementById('m-estimated-raw-cost')?.value) || 0;
+    const q  = parseFloat(document.getElementById('m-quoted-cost')?.value)  || 0;
+    const a  = parseFloat(document.getElementById('m-actual-spend')?.value) || 0;
+    const c  = parseFloat(document.getElementById('m-committed')?.value)    || 0;
 
-    // Cost Variance = Cost-to-Date − Estimated (positive = over the estimate / over budget)
-    document.getElementById('m-cost-variance').value = (isNaN(est) || isNaN(ctd)) ? '' : (ctd - est).toFixed(2);
-    // Margin: only meaningful on projects, computed consistently
-    document.getElementById('m-margin').value = (isNaN(sp) || isNaN(ctd)) ? '' : (sp - ctd).toFixed(2);
-
-    // Budget status banner — Estimated Cost IS the budget
-    const banner = document.getElementById('m-budget-status');
-    if (isNaN(est) || isNaN(ctd)) {
-      banner.style.display = 'none';
-    } else {
-      const diff = ctd - est;
-      const fmt = '$' + Math.abs(diff).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
-      if (diff > 0) {
-        banner.style.cssText = 'font-size:11px; padding:6px 10px; border-radius:6px; margin-top:6px; background:#fef2f2; color:#b91c1c; border:1px solid #fecaca;';
-        banner.innerHTML = `⚠ <b>Over budget</b> by ${fmt}`;
-      } else if (diff < 0) {
-        banner.style.cssText = 'font-size:11px; padding:6px 10px; border-radius:6px; margin-top:6px; background:#f0fdf4; color:#166534; border:1px solid #bbf7d0;';
-        banner.innerHTML = `✓ <b>Under budget</b> by ${fmt}`;
-      } else {
-        banner.style.cssText = 'font-size:11px; padding:6px 10px; border-radius:6px; margin-top:6px; background:#f3f4f6; color:#374151; border:1px solid #d1d5db;';
-        banner.innerHTML = `On budget — exact match`;
-      }
-      banner.style.display = '';
-    }
+    const pm = document.getElementById('m-project-margin');
+    const va = document.getElementById('m-variance');
+    if (pm) pm.value = (sp || rc) ? (sp - rc).toFixed(2) : '';
+    if (va) va.value = (q || a || c) ? (q - a - c).toFixed(2) : '';
   }
 
   function openPredecessorsPicker() {
@@ -4753,11 +5680,116 @@ Phase                                Dur (d)   Predecessor
 
   // recalcSaleFromMargin removed — Sale Price is now entered manually for projects.
 
+  /* Side effects when the user changes the Status dropdown:
+       Not Started → clear actual_start / actual_end (with confirmation if populated)
+       In Progress → set actual_start = today (if empty)
+       Done        → set actual_end = today (if empty); also actual_start if empty
+       Delayed     → prompt for a new scheduled_end date and reschedule downstream
+     Only invoked on the live subtask leaf node. The modal-open path keeps
+     parent rows disabled so this only runs on user input from leaves. */
+  function handleStatusChange(rowId) {
+    const sel = document.getElementById('m-status');
+    const newStatus = sel.value;
+    const today = (() => {
+      const d = new Date(); d.setHours(0,0,0,0);
+      return fmtDate(d);
+    })();
+    const aStart = document.getElementById('m-actual-start');
+    const aEnd   = document.getElementById('m-actual-end');
+    const sEndEl = document.getElementById('m-sched-end');
+
+    if (newStatus === 'Not Started') {
+      if ((aStart.value || aEnd.value) &&
+          !confirm('Reset actual dates? This subtask has an actual_start / actual_end already.')) {
+        // Revert to previous value: read from NODES.
+        const n = NODES.find(x => x.id === rowId);
+        sel.value = (n && n.status) || 'Not Started';
+        return;
+      }
+      aStart.value = '';
+      aEnd.value   = '';
+    } else if (newStatus === 'In Progress') {
+      if (!aStart.value) aStart.value = today;
+    } else if (newStatus === 'Done') {
+      if (!aStart.value) aStart.value = today;
+      if (!aEnd.value)   aEnd.value   = today;
+    } else if (newStatus === 'Delayed') {
+      // Default new end: today + (current sched span). Working-days-naive for the prompt.
+      const sStart = document.getElementById('m-sched-start').value;
+      const sEnd   = sEndEl.value;
+      let defaultISO = today;
+      if (sStart && sEnd) {
+        const span = Math.max(1, Math.round((new Date(sEnd) - new Date(sStart)) / 86400000));
+        const d = new Date(); d.setHours(0,0,0,0);
+        d.setDate(d.getDate() + span);
+        defaultISO = fmtDate(d);
+      }
+      const input = prompt('Delayed — new scheduled end date (YYYY-MM-DD):', defaultISO);
+      if (input == null) {
+        const n = NODES.find(x => x.id === rowId);
+        sel.value = (n && n.status) || 'Not Started';
+        return;
+      }
+      // Validation: must be a valid date and ≥ scheduled_start.
+      const newEnd = new Date(input);
+      if (isNaN(+newEnd) || (sStart && newEnd < new Date(sStart))) {
+        alert(`Invalid date — must be on or after the scheduled start (${sStart || '—'}).`);
+        const n = NODES.find(x => x.id === rowId);
+        sel.value = (n && n.status) || 'Not Started';
+        return;
+      }
+      sEndEl.value = fmtDate(newEnd);
+      // Downstream reschedule runs after saveModal commits the change.
+      // The existing runCPM(projectId, 'forward') is invoked on save below.
+    }
+  }
+
+  /* Show/hide the three financial sections based on row type.
+       project → all three. task → live only (read-only). subtask → live only
+       (editable for leaves; read-only when the subtask itself has children). */
+  function applyFinancialSectionVisibility(rowType, isParent) {
+    const propEl = document.getElementById('m-fin-proposal');
+    const liveEl = document.getElementById('m-fin-live');
+    const endEl  = document.getElementById('m-fin-end');
+    const hintEl = document.getElementById('m-fin-live-hint');
+    if (propEl) propEl.style.display = (rowType === 'project') ? '' : 'none';
+    if (endEl)  endEl.style.display  = (rowType === 'project') ? '' : 'none';
+    if (liveEl) liveEl.style.display = '';
+
+    // Editability of the three Live inputs:
+    //   - subtask without children → editable
+    //   - everything else (task, project, parent subtask) → read-only (rolled up)
+    const editableLive = (rowType === 'subtask') && !isParent;
+    ['m-quoted-cost','m-actual-spend','m-committed'].forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.readOnly = !editableLive;
+      el.style.background = editableLive ? 'white' : '#f9fafb';
+      el.style.color      = editableLive ? '#111827' : '#6b7280';
+    });
+    // Sale Price + Estimated Raw Cost: editable only on the project row itself.
+    ['m-sale-price','m-estimated-raw-cost'].forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const editable = (rowType === 'project');
+      el.readOnly = !editable;
+      el.style.background = editable ? 'white' : '#f9fafb';
+      el.style.color      = editable ? '#111827' : '#6b7280';
+    });
+    if (hintEl) {
+      hintEl.textContent = editableLive
+        ? '— enter actuals on each subtask; parent rows show the rolled-up sum'
+        : '— rolled up from subtasks';
+    }
+  }
+
   function openEdit(nodeIdx) {
     if (drag) return;
     modalIdx = nodeIdx;
     document.getElementById('modalTitle').textContent = 'Edit ' + (typeFromId(NODES[nodeIdx].id) || 'row');
     document.getElementById('m-parent-row').style.display = 'none';  // editing → ID is fixed
+    const projectRow = document.getElementById('m-project-row');
+    if (projectRow) projectRow.style.display = 'none';
     fillModal(NODES[nodeIdx]);
     document.getElementById('modalDelBtn').style.display = '';
     document.getElementById('modal').style.display = 'flex';
@@ -4779,7 +5811,15 @@ Phase                                Dur (d)   Predecessor
     modalIdx = -1;
     const parentRow    = document.getElementById('m-parent-row');
     const parentSelect = document.getElementById('m-parent');
+    const projectRow   = document.getElementById('m-project-row');
+    // Reset project-row visibility — only the subtask branch turns it back on.
+    if (projectRow) projectRow.style.display = 'none';
     let suggestedId;
+
+    // Natural-numeric ID compare so the dropdowns list rows by PID:
+    // "P1, P2, P3, P10" instead of "P1, P10, P2, P3".
+    const byIdNumeric = (a, b) =>
+      String(a.id).localeCompare(String(b.id), undefined, { numeric: true, sensitivity: 'base' });
 
     if (type === 'project') {
       // Anyone non-viewer can create a fresh project. The CSS `.readonly`
@@ -4794,7 +5834,7 @@ Phase                                Dur (d)   Predecessor
       }
       // Only show projects the user actually has edit access to. Ignore the
       // Mine/Projects ▾ filter here — those affect display only, not capability.
-      const projects = allProjects.filter(n => canEditProject(n.id));
+      const projects = allProjects.filter(n => canEditProject(n.id)).sort(byIdNumeric);
       if (!projects.length) {
         alert("You don't have edit access to any project. Click + Project to create one of your own first.");
         return;
@@ -4814,20 +5854,45 @@ Phase                                Dur (d)   Predecessor
         alert("You need to create a Task first — Subtasks live under a Task. Click \"+ Task\" before adding a Subtask.");
         return;
       }
-      // Only tasks whose project the user can edit.
-      const tasks = allTasks.filter(t => canEditProject(t.id.split('-')[0]));
-      if (!tasks.length) {
-        alert("You don't have edit access to any task. Add a task under one of your own projects first.");
+      // Subtask flow: first pick the project, then pick the parent task within it.
+      const projects = NODES
+        .filter(n => typeFromId(n.id) === 'project' && canEditProject(n.id))
+        .sort(byIdNumeric);
+      if (!projects.length) {
+        alert("You don't have edit access to any project. Click + Project to create one of your own first.");
         return;
       }
+      const projectSelect = document.getElementById('m-project');
+      const projectRow    = document.getElementById('m-project-row');
+      projectRow.style.display = '';
+      projectSelect.innerHTML = projects.map(p =>
+        `<option value="${esc(p.id)}">${esc(p.id)} — ${esc(p.name)}</option>`
+      ).join('');
+      projectSelect.value = projects[0].id;
+
+      // Re-populate the parent-task select for the currently-selected project.
+      const fillTasksForProject = (projectId) => {
+        const tasksInProject = NODES
+          .filter(t => typeFromId(t.id) === 'task' && t.id.split('-')[0] === projectId)
+          .sort(byIdNumeric);
+        if (!tasksInProject.length) {
+          parentSelect.innerHTML = `<option value="">— no tasks yet in this project —</option>`;
+          parentSelect.value = '';
+          document.getElementById('m-id').value = '';
+          return;
+        }
+        parentSelect.innerHTML = tasksInProject.map(t =>
+          `<option value="${esc(t.id)}">${esc(t.id)} — ${esc(t.name)}</option>`
+        ).join('');
+        parentSelect.value = tasksInProject[0].id;
+        document.getElementById('m-id').value = nextId(parentSelect.value);
+      };
+
       parentRow.style.display = '';
-      parentSelect.innerHTML = tasks.map(t => {
-        const proj = NODES.find(n => n.id === t.id.split('-')[0]);
-        const projName = proj ? proj.name : '';
-        return `<option value="${esc(t.id)}">${esc(t.id)} — ${esc(t.name)}${projName ? ` · in ${esc(projName)}` : ''}</option>`;
-      }).join('');
-      parentSelect.value = tasks[0].id;
-      suggestedId = nextId(parentSelect.value);
+      fillTasksForProject(projects[0].id);
+      suggestedId = document.getElementById('m-id').value || nextId(projects[0].id);
+
+      projectSelect.onchange = () => fillTasksForProject(projectSelect.value);
       parentSelect.onchange = () => {
         document.getElementById('m-id').value = nextId(parentSelect.value);
       };
@@ -4841,7 +5906,12 @@ Phase                                Dur (d)   Predecessor
       sched_start: today, sched_end: monthLater,
       actual_start: today, actual_end: monthLater,
       slack: '', percent_done: 0,
-      est_cost: '', cost_to_date: '', sale_price: '',
+      status: 'Not Started',
+      // Legacy (cleared on save by saveModal anyway):
+      est_cost: '', cost_to_date: '',
+      // New financial model:
+      sale_price: '', estimated_raw_cost: '',
+      quoted_cost: '', actual_spend_to_date: '', committed_to_spend: '',
     });
     document.getElementById('modalDelBtn').style.display = 'none';
     document.getElementById('modal').style.display = 'flex';
@@ -4890,21 +5960,39 @@ Phase                                Dur (d)   Predecessor
       actual_start: actualStart,
       actual_end:   actualEnd,
       slack:        document.getElementById('m-slack').value,
-      // % Done is only editable on leaves; parents derive from children. The
-      // input is read-only for parents, but skip persisting it regardless so
-      // the row is unambiguous in storage.
-      percent_done: isParent ? '' : clampPercent(document.getElementById('m-percent-done').value),
-      // For parent rows: Est / Cost roll up from children — don't persist their values
-      est_cost:     isParent ? '' : document.getElementById('m-est-cost').value,
-      cost_to_date: isParent ? '' : document.getElementById('m-cost-date').value,
-      // Sale Price lives only on the project row; keep what's typed (manual entry, no roll-up)
-      sale_price:   typeFromId(id) === 'project' ? document.getElementById('m-sale-price').value : '',
+      // Status is the user-facing field — pct_done is derived for back-compat (Done=100, others=0).
+      // Subtask (leaf): writes status from the dropdown. Parent rows persist neither.
+      status:       (rowType === 'subtask' && !isParent)
+                      ? (document.getElementById('m-status').value || 'Not Started')
+                      : '',
+      percent_done: (rowType === 'subtask' && !isParent)
+                      ? (document.getElementById('m-status').value === 'Done' ? 100 : 0)
+                      : '',
+      // Project meta — only persisted on project rows.
+      rtb_code:       rowType === 'project' ? document.getElementById('m-rtb-code').value.trim()       : '',
+      installer_name: rowType === 'project' ? document.getElementById('m-installer-name').value.trim() : '',
+      project_type:   rowType === 'project' ? document.getElementById('m-project-type').value         : '',
+      sector:         rowType === 'project' ? document.getElementById('m-sector').value               : '',
+      // Financial fields — new model.
+      //   Project: sale_price + estimated_raw_cost are manual; live fields are derived (don't persist).
+      //   Task:    everything derived (don't persist).
+      //   Subtask (leaf): quoted_cost / actual_spend_to_date / committed_to_spend are manual.
+      sale_price:           rowType === 'project' ? document.getElementById('m-sale-price').value : '',
+      estimated_raw_cost:   rowType === 'project' ? document.getElementById('m-estimated-raw-cost').value : '',
+      quoted_cost:          (rowType === 'subtask' && !isParent) ? document.getElementById('m-quoted-cost').value  : '',
+      actual_spend_to_date: (rowType === 'subtask' && !isParent) ? document.getElementById('m-actual-spend').value : '',
+      committed_to_spend:   (rowType === 'subtask' && !isParent) ? document.getElementById('m-committed').value    : '',
+      // Legacy fields — cleared on save so storage stays clean. The migration shim
+      // already copied them into the new fields on the previous load.
+      est_cost:     '',
+      cost_to_date: '',
       collapsed:    modalIdx >= 0 ? NODES[modalIdx].collapsed : false,
     };
 
-    // Predecessor gate — if this is a subtask whose predecessors aren't all 100%,
-    // force its stored % done to 0 so the row can't "start" until they finish.
+    // Predecessor gate — if this is a subtask whose predecessors aren't all Done,
+    // force its stored status to 'Not Started' so the row can't "start" until they finish.
     if (!isParent && !predecessorsComplete(node)) {
+      node.status = 'Not Started';
       node.percent_done = 0;
     }
 
@@ -5004,20 +6092,36 @@ Phase                                Dur (d)   Predecessor
       if (!isNaN(raw) || isFinite(eff)) {
         const showVal = isFinite(eff) ? eff : raw;
         const capped = (MAX_SLACK_CAP != null && !isNaN(raw) && raw > MAX_SLACK_CAP);
-        html += `<div class="tip-row"><b>Slack:</b> ${esc(showVal)} day${showVal === 1 ? '' : 's'}${capped ? ` <span style="color:#9ca3af;font-size:10px;">(raw ${esc(raw)}, capped to ${esc(MAX_SLACK_CAP)})</span>` : ''}</div>`;
+        html += `<div class="tip-row"><b>Buffer:</b> ${esc(showVal)} day${showVal === 1 ? '' : 's'}${capped ? ` <span style="color:#9ca3af;font-size:10px;">(raw ${esc(raw)}, capped to ${esc(MAX_SLACK_CAP)})</span>` : ''}</div>`;
       }
     }
     {
       const isParent = childrenOf(n).length > 0;
-      const pdEff = ePercentDone(n);
-      const pdStr = pdEff % 1 === 0 ? pdEff.toFixed(0) : pdEff.toFixed(1);
-      html += `<div class="tip-row"><b>% Done:</b> ${pdStr}%${isParent ? ' <span style="color:#9ca3af;font-size:10px;">(rolled up)</span>' : ''} · <b style="color:${STATUS_COLORS[status]}">${esc(status)}</b></div>`;
+      html += `<div class="tip-row"><b>Status:</b> <b style="color:${STATUS_COLORS[status]}">${esc(status)}</b>${isParent ? ' <span style="color:#9ca3af;font-size:10px;">(rolled up)</span>' : ''}</div>`;
     }
-    if (n.est_cost)      html += `<div class="tip-row"><b>Est. Cost:</b> $${esc(n.est_cost)}</div>`;
-    if (n.cost_to_date)  html += `<div class="tip-row"><b>Cost-to-Date:</b> $${esc(n.cost_to_date)}</div>`;
-    if (variance !== '') html += `<div class="tip-row"><b>Variance:</b> $${esc(variance)}</div>`;
-    if (n.sale_price)    html += `<div class="tip-row"><b>Sale Price:</b> $${esc(n.sale_price)}</div>`;
-    if (margin !== '')   html += `<div class="tip-row"><b>Margin:</b> $${esc(margin)}</div>`;
+    // Financials — show in lifecycle order. Money values are rolled-up for parents.
+    {
+      const rowType = typeFromId(n.id);
+      const isParent = childrenOf(n).length > 0;
+      const fmt$ = v => '$' + Number(v).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+      if (rowType === 'project') {
+        if (n.sale_price)         html += `<div class="tip-row"><b>Sale Price:</b> ${fmt$(n.sale_price)}</div>`;
+        if (n.estimated_raw_cost) html += `<div class="tip-row"><b>Est. Raw Cost:</b> ${fmt$(n.estimated_raw_cost)}</div>`;
+        const pm = computeProjectMargin(n);
+        if (pm !== '')            html += `<div class="tip-row"><b>Project Margin:</b> ${fmt$(pm)}</div>`;
+      }
+      const q = isParent ? eQuoted(n) : (parseFloat(n.quoted_cost) || 0);
+      const a = isParent ? eActual(n) : (parseFloat(n.actual_spend_to_date) || 0);
+      const c = isParent ? eCommitted(n) : (parseFloat(n.committed_to_spend) || 0);
+      if (q) html += `<div class="tip-row"><b>Quoted:</b> ${fmt$(q)}</div>`;
+      if (a) html += `<div class="tip-row"><b>Actual:</b> ${fmt$(a)}</div>`;
+      if (c) html += `<div class="tip-row"><b>Committed:</b> ${fmt$(c)}</div>`;
+      if (variance !== '') html += `<div class="tip-row"><b>Variance:</b> ${fmt$(variance)}</div>`;
+      if (rowType === 'project') {
+        const fm = computeFinalMargin(n);
+        if (fm !== '') html += `<div class="tip-row"><b>Final Margin:</b> ${fmt$(fm)}</div>`;
+      }
+    }
                           html += `<div style="margin-top:5px;color:#9ca3af;font-size:10px;">Drag bar · Drag edges to resize · Click label to edit</div>`;
     tipEl.innerHTML = html;
     tipEl.style.display = 'block';
@@ -5307,6 +6411,324 @@ Phase                                Dur (d)   Predecessor
     });
   }
 
+  // ── CSV import wizard: pure helpers (also used by tests) ──
+  // detectImportConflicts: returns Map<importedProjId, existingProjId>
+  // for projects whose id AND name both match (case-sensitive).
+  function detectImportConflicts(imported, existing) {
+    const existingByKey = new Map();
+    for (const n of existing) {
+      if (n.type !== 'project') continue;
+      existingByKey.set(`${n.id}\x00${n.name}`, n.id);
+    }
+    const out = new Map();
+    for (const n of imported) {
+      if (n.type !== 'project') continue;
+      const key = `${n.id}\x00${n.name}`;
+      if (existingByKey.has(key)) out.set(n.id, existingByKey.get(key));
+    }
+    return out;
+  }
+
+  // Renumber imported tasks/subtasks of one project to slot under an
+  // existing project at the next free T-number. Returns { nodes, remap }.
+  function renumberMergedTasks(existingProjectId, existingNodes, importedNodesForProject) {
+    const escId = existingProjectId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp('^' + escId + '-T(\\d+)$');
+    let maxT = 0;
+    for (const n of existingNodes) {
+      const m = (n.id || '').match(re);
+      if (m) {
+        const num = parseInt(m[1], 10);
+        if (num > maxT) maxT = num;
+      }
+    }
+    const proj = importedNodesForProject.find(n => n.type === 'project');
+    if (!proj) return { nodes: [], remap: new Map() };
+    const importedPid = proj.id;
+    const tasksInOrder = importedNodesForProject
+      .filter(n => {
+        const segs = (n.id || '').split('-');
+        return segs.length === 2 && segs[0] === importedPid;
+      })
+      .sort((a, b) => {
+        const an = parseInt((a.id.match(/-T(\d+)$/) || [0, 0])[1], 10);
+        const bn = parseInt((b.id.match(/-T(\d+)$/) || [0, 0])[1], 10);
+        return an - bn;
+      });
+    const remap = new Map();
+    remap.set(importedPid, existingProjectId);
+    let nextT = maxT;
+    for (const t of tasksInOrder) {
+      nextT++;
+      remap.set(t.id, `${existingProjectId}-T${nextT}`);
+    }
+    for (const n of importedNodesForProject) {
+      const segs = (n.id || '').split('-');
+      if (segs.length !== 3) continue;
+      const taskOldId = `${segs[0]}-${segs[1]}`;
+      const newTaskId = remap.get(taskOldId);
+      if (!newTaskId) continue;
+      remap.set(n.id, `${newTaskId}-${segs[2]}`);
+    }
+    const nodes = importedNodesForProject
+      .filter(n => n.type !== 'project')
+      .map(n => ({ ...n, id: remap.get(n.id) || n.id }));
+    return { nodes, remap };
+  }
+
+  function rewriteImportPreds(remap, nodes) {
+    return nodes.map(n => {
+      if (!n.predecessors) return n;
+      const rewritten = n.predecessors
+        .split(/[,;]/)
+        .map(p => p.trim())
+        .filter(Boolean)
+        .map(p => remap.get(p) || p)
+        .join(', ');
+      return { ...n, predecessors: rewritten };
+    });
+  }
+
+  // ── CSV import wizard: modal state + render ──
+  let importState = null;  // { fileName, parsed, mapping, rows[], conflictMap }
+
+  function openImportModal(fileName, importedNodes) {
+    // Migrate legacy fields BEFORE conflict detection so the new fields
+    // are populated before the user sees the import preview.
+    migrateLegacyFields(importedNodes);
+    const conflicts = detectImportConflicts(importedNodes, NODES);
+    const projects = importedNodes.filter(n => n.type === 'project');
+    const taskCountByProj = new Map();
+    for (const n of importedNodes) {
+      if (n.type === 'project') continue;
+      const pid = (n.id || '').split('-')[0];
+      taskCountByProj.set(pid, (taskCountByProj.get(pid) || 0) + 1);
+    }
+    importState = {
+      fileName,
+      importedNodes,
+      conflictMap: conflicts,
+      rows: projects.map(p => ({
+        id: p.id,
+        name: p.name,
+        included: true,
+        conflict: conflicts.has(p.id),
+        existingId: conflicts.get(p.id) || null,
+        resolution: conflicts.has(p.id) ? 'new' : null,
+        taskCount: taskCountByProj.get(p.id) || 0,
+      })),
+    };
+    document.getElementById('im-title').textContent = `📥 Import from ${fileName}`;
+    document.getElementById('im-summary').textContent =
+      `${projects.length} project(s), ${importedNodes.length - projects.length} task/subtask(s) found. ` +
+      `${conflicts.size} conflict(s) detected.`;
+    renderImportRows();
+    document.getElementById('importModal').style.display = 'flex';
+  }
+
+  function closeImportModal() {
+    document.getElementById('importModal').style.display = 'none';
+    importState = null;
+  }
+
+  function imRowsBy(id) { return importState?.rows.find(r => r.id === id); }
+
+  function renderImportRows() {
+    const wrap = document.getElementById('im-rows');
+    if (!importState) { wrap.innerHTML = ''; return; }
+    wrap.innerHTML = importState.rows.map(r => {
+      const conflictChip = r.conflict
+        ? '<span style="font-size:10px; padding:2px 6px; border-radius:10px; background:#fee2e2; color:#7f1d1d; margin-left:6px;">Conflict — exists on board</span>'
+        : '';
+      const dropdown = r.conflict ? `
+        <select onchange="imSetResolution('${esc(r.id)}', this.value)" style="font-size:11px; padding:3px 6px; margin-left:8px;">
+          <option value="new"        ${r.resolution === 'new'        ? 'selected' : ''}>Import as new</option>
+          <option value="keep"       ${r.resolution === 'keep'       ? 'selected' : ''}>Keep mine</option>
+          <option value="overwrite"  ${r.resolution === 'overwrite'  ? 'selected' : ''}>Overwrite mine</option>
+          <option value="merge"      ${r.resolution === 'merge'      ? 'selected' : ''}>Merge</option>
+        </select>` : '';
+      const includeDisabled = r.conflict && r.resolution === 'keep';
+      const includeChecked  = r.included && !includeDisabled;
+      const warn = (r.conflict && r.resolution === 'overwrite')
+        ? `<div style="font-size:10px; color:#92400e; margin-top:4px; margin-left:24px;">⚠ Predecessor refs from other projects into this one will become dangling.</div>`
+        : '';
+      return `
+        <div style="padding:8px 12px; border-bottom:1px solid #f3f4f6; display:flex; align-items:center; flex-wrap:wrap;">
+          <input type="checkbox" ${includeChecked ? 'checked' : ''} ${includeDisabled ? 'disabled' : ''}
+                 onchange="imSetIncluded('${esc(r.id)}', this.checked)" style="margin-right:8px;">
+          <span style="font-weight:600; color:#111827;">${esc(r.name || '(no name)')}</span>
+          <span style="font-size:10px; color:#9ca3af; margin-left:6px;">${esc(r.id)}</span>
+          <span style="font-size:10px; color:#6b7280; margin-left:6px;">· ${r.taskCount} task/subtask(s)</span>
+          ${conflictChip}
+          ${dropdown}
+          <div style="flex-basis:100%;">${warn}</div>
+        </div>`;
+    }).join('');
+    updateImportFooter();
+  }
+
+  function imSetIncluded(id, checked) {
+    const r = imRowsBy(id); if (!r) return;
+    r.included = checked;
+    updateImportFooter();
+  }
+  function imSetResolution(id, resolution) {
+    const r = imRowsBy(id); if (!r) return;
+    r.resolution = resolution;
+    // Auto-uncheck on 'keep'; never auto-recheck — leave the user's checkbox
+    // state alone so a deliberate manual exclusion is preserved.
+    if (resolution === 'keep') r.included = false;
+    renderImportRows();
+  }
+  function imSelectAll(checked) {
+    if (!importState) return;
+    for (const r of importState.rows) {
+      if (r.conflict && r.resolution === 'keep') continue;
+      r.included = checked;
+    }
+    renderImportRows();
+  }
+  function imApplyDefaultResolution(value) {
+    if (!importState || !value) return;
+    for (const r of importState.rows) {
+      if (!r.conflict) continue;
+      r.resolution = value;
+      if (value === 'keep') r.included = false;
+    }
+    renderImportRows();
+  }
+  function updateImportFooter() {
+    if (!importState) return;
+    const included = importState.rows.filter(r => r.included);
+    const taskCount = included.reduce((s, r) => s + r.taskCount, 0);
+    document.getElementById('im-footer').textContent =
+      `${included.length} of ${importState.rows.length} project(s) will be imported · ${taskCount} task/subtask(s)`;
+    document.getElementById('im-confirm').disabled = !included.length;
+  }
+
+  async function confirmImport() {
+    if (!importState) return;
+    // Claim the state immediately so a second click during the await
+    // gap below can't re-enter. updateImportFooter re-enables the
+    // confirm button on checkbox changes, which would otherwise allow a
+    // second invocation to operate on partially-mutated state.
+    const state = importState;
+    importState = null;
+    const btn = document.getElementById('im-confirm');
+    btn.disabled = true;
+
+    // Partition imported nodes by project resolution.
+    const importedByProj = new Map();
+    for (const n of state.importedNodes) {
+      const pid = (n.type === 'project') ? n.id : (n.id || '').split('-')[0];
+      if (!importedByProj.has(pid)) importedByProj.set(pid, []);
+      importedByProj.get(pid).push(n);
+    }
+
+    const finalNodes = [];
+    const toDeleteIds = new Set();   // ids to remove from board + Supabase
+    const globalRemap = new Map();   // union of all per-project remaps (for cross-project preds)
+
+    // 1. Walk per-project rows.
+    const overwriteProjectIds = [];
+    const asNewProjects = [];        // arrays of node-arrays, one per project, for renumber pass
+    for (const r of state.rows) {
+      if (!r.included || (r.conflict && r.resolution === 'keep')) continue;
+      const projNodes = importedByProj.get(r.id) || [];
+
+      if (r.conflict && r.resolution === 'overwrite') {
+        // Mark the existing project + descendants for deletion.
+        const existPid = r.existingId;
+        for (const n of NODES) {
+          if (n.id === existPid || (n.id || '').startsWith(existPid + '-')) {
+            toDeleteIds.add(n.id);
+          }
+        }
+        overwriteProjectIds.push(r.id);
+        // Imported keeps its original id (which == existPid by definition of conflict match).
+        finalNodes.push(...projNodes);
+      } else if (r.conflict && r.resolution === 'merge') {
+        const { nodes, remap } = renumberMergedTasks(r.existingId, NODES, projNodes);
+        for (const [k, v] of remap.entries()) globalRemap.set(k, v);
+        finalNodes.push(...nodes);
+      } else {
+        // 'new' (or no conflict): renumber via the existing helper.
+        asNewProjects.push(projNodes);
+      }
+    }
+
+    // 2. Renumber all 'as-new' projects together so they don't collide
+    //    with each other or with existing P-ids.
+    if (asNewProjects.length) {
+      const flat = asNewProjects.flat();
+      const beforeIds = flat.map(n => n.id);
+      remapCollidingProjectIds(flat);  // mutates in place
+      // Build the remap entries from before→after so cross-project preds rewrite.
+      flat.forEach((n, i) => {
+        if (n.id !== beforeIds[i]) globalRemap.set(beforeIds[i], n.id);
+      });
+      finalNodes.push(...flat);
+    }
+
+    // 3. Rewrite predecessors across the entire finalNodes set using the
+    //    union remap. Refs not in the remap are kept (refs into existing board).
+    const rewritten = rewriteImportPreds(globalRemap, finalNodes);
+
+    // 4. Apply: delete overwritten rows, push new rows, refresh.
+    pushHistory();
+    if (toDeleteIds.size) {
+      const ids = [...toDeleteIds];
+      // Remove from NODES locally first so render is immediate.
+      for (let i = NODES.length - 1; i >= 0; i--) {
+        if (toDeleteIds.has(NODES[i].id)) NODES.splice(i, 1);
+      }
+      if (window.Supa?.deleteRows) {
+        try { await window.Supa.deleteRows(ids); } catch (e) { console.warn('[import] deleteRows failed', e); }
+      }
+    }
+    // Dedupe against existing ids (paranoia — should never trip after renumber).
+    const existingIds = new Set(NODES.map(n => n.id));
+    let skipped = 0;
+    for (const n of rewritten) {
+      if (existingIds.has(n.id)) { skipped++; continue; }
+      NODES.push(n);
+      existingIds.add(n.id);
+    }
+    if (skipped) console.warn(`[import] skipped ${skipped} duplicate id(s)`);
+
+    // 5. Selection + editable-set fixups (mirrors original handler).
+    for (const r of state.rows) {
+      if (!r.included || (r.conflict && r.resolution === 'keep')) continue;
+      // Determine the final project id we just pushed.
+      let finalPid = r.id;
+      if (r.conflict && r.resolution === 'overwrite') finalPid = r.existingId;
+      else if (r.conflict && r.resolution === 'merge') finalPid = r.existingId;
+      else finalPid = globalRemap.get(r.id) || r.id;
+      selectedProjects.add(finalPid);
+      if (window.__editableProjectIds) window.__editableProjectIds.add(finalPid);
+    }
+
+    const fileName = state.fileName;
+    const importedCount = rewritten.length - skipped;
+    closeImportModal();
+    saveLocal(); populateFilters(); render();
+    flashHint(`📥 Imported ${importedCount} row${importedCount === 1 ? '' : 's'} from ${fileName}`);
+    if (window.Supa?.refreshEditableProjects) {
+      setTimeout(() => window.Supa.refreshEditableProjects(), 1500);
+    }
+  }
+
+  // Test hook: expose pure helpers for integration tests. Production code
+  // does not depend on this — it's a no-op except in tests where a unit
+  // test directly invokes the helpers via window.__importApply.
+  if (typeof window !== 'undefined') {
+    window.__importApply = {
+      detectImportConflicts,
+      renumberMergedTasks,
+      rewriteImportPreds,
+    };
+  }
+
   const dropOverlay = document.getElementById('dropOverlay');
   ['dragenter','dragover'].forEach(evt => {
     document.body.addEventListener(evt, e => {
@@ -5341,50 +6763,9 @@ Phase                                Dur (d)   Predecessor
     if (result.error) { alert(result.error); return; }
     if (!result.nodes.length) { alert('No usable rows in this CSV.'); return; }
 
-    // Append as new projects; existing rows are untouched. Colliding P-IDs are
-    // renumbered to the next free number so nothing in the current board is
-    // overwritten or merged into.
-    const projectCount = result.nodes.filter(n => n.type === 'project').length;
-    if (NODES.length && !confirm(
-      `Import ${result.nodes.length} rows (${projectCount} project${projectCount === 1 ? '' : 's'}) from "${file.name}"?\n\n` +
-      `Existing data will be kept. New projects get fresh IDs to avoid clashes.\n\n` +
-      `(Cancel to abort. To replace all data instead, use ↺ Reset first.)`
-    )) return;
-
-    pushHistory();
-    remapCollidingProjectIds(result.nodes);
-
-    // Dedupe against existing NODES — if the CSV repeats an id that already
-    // exists after remap (e.g. a row exported and re-dropped without renumbering),
-    // skip it rather than create a duplicate that would crash the Supabase upsert.
-    const existingIds = new Set(NODES.map(n => n.id));
-    const seenImport = new Set();
-    let skipped = 0;
-    for (const n of result.nodes) {
-      if (existingIds.has(n.id) || seenImport.has(n.id)) { skipped++; continue; }
-      seenImport.add(n.id);
-      NODES.push(n);
-    }
-    if (skipped) console.warn(`[import] skipped ${skipped} row(s) whose ids already exist`);
-
-    // Select newly imported projects in the filter so they're visible. Also
-    // mark them optimistically as editable — the current user just created
-    // them, so the audit trigger will set owner_user_id = auth.uid() on insert.
-    // We refresh from the server afterwards to converge with the real state.
-    result.nodes.forEach(n => {
-      if (n.type === 'project') {
-        selectedProjects.add(n.id);
-        if (window.__editableProjectIds) window.__editableProjectIds.add(n.id);
-      }
-    });
-
-    saveLocal(); populateFilters(); render();
-    flashHint(`📥 Imported ${result.nodes.length} row${result.nodes.length === 1 ? '' : 's'} from ${file.name}`);
-    // After Supabase upserts settle, pull the authoritative editable set so the
-    // Mine filter shows every newly-created project (not just the last one).
-    if (window.Supa?.refreshEditableProjects) {
-      setTimeout(() => window.Supa.refreshEditableProjects(), 1500);
-    }
+    // Open the picker / conflict-resolution modal; apply happens in
+    // confirmImport() once the user clicks Import.
+    openImportModal(file.name, result.nodes);
   });
 
   /* ══════════════════════════════════════════════════════════════
@@ -6367,7 +7748,40 @@ Phase                                Dur (d)   Predecessor
   }
 
   // ---- operation appliers — mutate the draft array ----
+  // For the given op, return the project id the user would have to be able
+  // to edit. Returns null when the op is read-only or creates a brand-new
+  // project (which anyone non-viewer is allowed to do).
+  function aiOpProjectId(op, draft) {
+    if (!op || !op.operation) return null;
+    if (op.operation === 'query_schedule')           return null;
+    if (op.operation === 'create_project_candidate') return null;
+    if (op.operation === 'create_item' && op.target?.item_type === 'project') return null;
+
+    if (op.operation === 'create_item') {
+      const projName = String(op.target?.project || '').trim().toLowerCase();
+      if (!projName || projName === 'n/a') return null;
+      const proj = draft.find(n =>
+        typeFromId(n.id) === 'project'
+        && String(n.name || '').toLowerCase() === projName
+      );
+      return proj ? proj.id : null;
+    }
+
+    const res = aiResolveTarget(op.target, draft);
+    if (!res || !res.ok || !res.id) return null;
+    return res.id.split('-')[0];
+  }
+
   function aiApplyOperation(op, draft) {
+    // RBAC gate — reject ops touching a project the user cannot edit. The
+    // chat edge function already tells the LLM about the user's scope, but
+    // we re-check here so a hand-crafted or out-of-date suggestion still
+    // can't slip through. Supabase RLS provides the final backstop.
+    const targetedProjectId = aiOpProjectId(op, draft);
+    if (targetedProjectId && !canEditProject(targetedProjectId)) {
+      return { ok: false, reason: 'permission_denied', projectId: targetedProjectId };
+    }
+
     switch (op.operation) {
       case 'shift_item':      return aiApplyShift(op, draft);
       case 'update_progress': return aiApplyProgress(op, draft);
@@ -6415,7 +7829,7 @@ Phase                                Dur (d)   Predecessor
     lines.push(`Scheduled: ${fmt(rng.schedStart)} → ${fmt(rng.schedEnd)}`);
     lines.push(`Actual:    ${fmt(rng.actualStart)} → ${fmt(rng.actualEnd)}`);
     if (live.slack !== '' && live.slack != null) {
-      lines.push(`Slack: ${live.slack} day${String(live.slack) === '1' ? '' : 's'}${String(live.slack) === '0' ? ' ★ critical path' : ''}`);
+      lines.push(`Buffer: ${live.slack} day${String(live.slack) === '1' ? '' : 's'}${String(live.slack) === '0' ? ' ★ critical path' : ''}`);
     }
     if (live.predecessors) lines.push(`Predecessors: ${live.predecessors}`);
     return { ok: true, targetId: res.id, text: lines.join('\n') };
@@ -7979,6 +9393,17 @@ Phase                                Dur (d)   Predecessor
     const result = aiApplyOperation(op, AI.draft);
     if (!result.ok) {
       let msg = '✗ ' + (result.reason || 'Could not apply');
+      if (result.reason === 'permission_denied') {
+        const pid = result.projectId || 'that project';
+        msg = `🔒 Skipped — you don't have edit access to ${pid}. Ask an admin to share the project with you (or for AI assistance only on projects you own).`;
+        if (AI.pendingChanges.length === 0) {
+          AI.draft = null; AI.baseSnapshot = null;
+        }
+        aiAppendMessage('assistant', msg);
+        aiRenderPreview();
+        aiProcessNext();
+        return;
+      }
       if (result.candidates && result.candidates.length && result.kind) {
         if (result.kind === 'owner') {
           aiAskOwnerChoice(op, result.candidates, result.queriedName, result.reason, messageText);
@@ -8767,6 +10192,14 @@ Phase                                Dur (d)   Predecessor
   }
 
   function aiTogglePanel() {
+    // Viewers are blocked at the edge function too, but bail here so a
+    // viewer who manually unhides the button via devtools still can't fire
+    // a chat request from the panel UI.
+    const role = window.Supa?.currentRole?.();
+    if (role === 'viewer') {
+      flashHint('Viewers cannot use the AI assistant.');
+      return;
+    }
     const p = document.getElementById('ai-panel');
     if (!p) return;
     p.classList.toggle('open');
