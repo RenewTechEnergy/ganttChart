@@ -3265,11 +3265,19 @@ Phase                                Dur (d)   Predecessor
     }
     return kids.reduce((s, k) => s + getEffective(k, field), 0);
   }
-  // Convenience for displays — Estimated Cost is the budget baseline.
-  const eEst    = n => getEffective(n, 'est_cost');
-  const eSpent  = n => getEffective(n, 'cost_to_date');
+  // Convenience for displays. The new model uses three subtask-level fields
+  // (quoted_cost, actual_spend_to_date, committed_to_spend) that roll up to
+  // tasks and projects via getEffective. eEst/eSpent are kept as aliases so
+  // any untouched legacy display code (e.g. bar tinting fallbacks) keeps
+  // working until PR 2/3 rewrites those call sites.
+  const eQuoted    = n => getEffective(n, 'quoted_cost');
+  const eActual    = n => getEffective(n, 'actual_spend_to_date');
+  const eCommitted = n => getEffective(n, 'committed_to_spend');
+  const eEst       = eQuoted;
+  const eSpent     = eActual;
   // Sale Price lives only on project rows — don't roll up across hierarchy
-  const eSale = n => parseFloat(n.sale_price) || 0;
+  const eSale    = n => parseFloat(n.sale_price) || 0;
+  const eRawCost = n => parseFloat(n.estimated_raw_cost) || 0;
 
   /* ── % Done roll-up ──
      Leaves return their own stored value (clamped to 0–100).
