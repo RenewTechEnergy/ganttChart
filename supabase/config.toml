@@ -435,3 +435,12 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/invite-user/deno.json"
 entrypoint = "./functions/invite-user/index.ts"
+
+# delete-user is called by an already-signed-in admin. The function
+# re-verifies the caller's role server-side using the forwarded JWT, so we
+# don't need the platform's JWT check on top.
+[functions.delete-user]
+enabled = true
+verify_jwt = false
+import_map = "./functions/delete-user/deno.json"
+entrypoint = "./functions/delete-user/index.ts"
