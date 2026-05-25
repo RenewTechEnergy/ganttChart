@@ -5975,6 +5975,112 @@ Phase                                Dur (d)   Predecessor
     document.getElementById('im-confirm').disabled = !included.length;
   }
 
+  async function confirmImport() {
+    if (!importState) return;
+    const btn = document.getElementById('im-confirm');
+    btn.disabled = true;
+
+    // Partition imported nodes by project resolution.
+    const importedByProj = new Map();
+    for (const n of importState.importedNodes) {
+      const pid = (n.type === 'project') ? n.id : (n.id || '').split('-')[0];
+      if (!importedByProj.has(pid)) importedByProj.set(pid, []);
+      importedByProj.get(pid).push(n);
+    }
+
+    const finalNodes = [];
+    const toDeleteIds = new Set();   // ids to remove from board + Supabase
+    const globalRemap = new Map();   // union of all per-project remaps (for cross-project preds)
+
+    // 1. Walk per-project rows.
+    const overwriteProjectIds = [];
+    const asNewProjects = [];        // arrays of node-arrays, one per project, for renumber pass
+    for (const r of importState.rows) {
+      if (!r.included || (r.conflict && r.resolution === 'keep')) continue;
+      const projNodes = importedByProj.get(r.id) || [];
+
+      if (r.conflict && r.resolution === 'overwrite') {
+        // Mark the existing project + descendants for deletion.
+        const existPid = r.existingId;
+        for (const n of NODES) {
+          if (n.id === existPid || (n.id || '').startsWith(existPid + '-')) {
+            toDeleteIds.add(n.id);
+          }
+        }
+        overwriteProjectIds.push(r.id);
+        // Imported keeps its original id (which == existPid by definition of conflict match).
+        finalNodes.push(...projNodes);
+      } else if (r.conflict && r.resolution === 'merge') {
+        const { nodes, remap } = renumberMergedTasks(r.existingId, NODES, projNodes);
+        for (const [k, v] of remap.entries()) globalRemap.set(k, v);
+        finalNodes.push(...nodes);
+      } else {
+        // 'new' (or no conflict): renumber via the existing helper.
+        asNewProjects.push(projNodes);
+      }
+    }
+
+    // 2. Renumber all 'as-new' projects together so they don't collide
+    //    with each other or with existing P-ids.
+    if (asNewProjects.length) {
+      const flat = asNewProjects.flat();
+      const beforeIds = flat.map(n => n.id);
+      remapCollidingProjectIds(flat);  // mutates in place
+      // Build the remap entries from before→after so cross-project preds rewrite.
+      flat.forEach((n, i) => {
+        if (n.id !== beforeIds[i]) globalRemap.set(beforeIds[i], n.id);
+      });
+      finalNodes.push(...flat);
+    }
+
+    // 3. Rewrite predecessors across the entire finalNodes set using the
+    //    union remap. Refs not in the remap are kept (refs into existing board).
+    const rewritten = rewriteImportPreds(globalRemap, finalNodes);
+
+    // 4. Apply: delete overwritten rows, push new rows, refresh.
+    pushHistory();
+    if (toDeleteIds.size) {
+      const ids = [...toDeleteIds];
+      // Remove from NODES locally first so render is immediate.
+      for (let i = NODES.length - 1; i >= 0; i--) {
+        if (toDeleteIds.has(NODES[i].id)) NODES.splice(i, 1);
+      }
+      if (window.Supa?.deleteRows) {
+        try { await window.Supa.deleteRows(ids); } catch (e) { console.warn('[import] deleteRows failed', e); }
+      }
+    }
+    // Dedupe against existing ids (paranoia — should never trip after renumber).
+    const existingIds = new Set(NODES.map(n => n.id));
+    let skipped = 0;
+    for (const n of rewritten) {
+      if (existingIds.has(n.id)) { skipped++; continue; }
+      NODES.push(n);
+      existingIds.add(n.id);
+    }
+    if (skipped) console.warn(`[import] skipped ${skipped} duplicate id(s)`);
+
+    // 5. Selection + editable-set fixups (mirrors original handler).
+    for (const r of importState.rows) {
+      if (!r.included || (r.conflict && r.resolution === 'keep')) continue;
+      // Determine the final project id we just pushed.
+      let finalPid = r.id;
+      if (r.conflict && r.resolution === 'overwrite') finalPid = r.existingId;
+      else if (r.conflict && r.resolution === 'merge') finalPid = r.existingId;
+      else finalPid = globalRemap.get(r.id) || r.id;
+      selectedProjects.add(finalPid);
+      if (window.__editableProjectIds) window.__editableProjectIds.add(finalPid);
+    }
+
+    const fileName = importState.fileName;
+    const importedCount = rewritten.length;
+    closeImportModal();
+    saveLocal(); populateFilters(); render();
+    flashHint(`📥 Imported ${importedCount} row${importedCount === 1 ? '' : 's'} from ${fileName}`);
+    if (window.Supa?.refreshEditableProjects) {
+      setTimeout(() => window.Supa.refreshEditableProjects(), 1500);
+    }
+  }
+
   const dropOverlay = document.getElementById('dropOverlay');
   ['dragenter','dragover'].forEach(evt => {
     document.body.addEventListener(evt, e => {
