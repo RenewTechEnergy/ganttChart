@@ -142,6 +142,10 @@
     .modal-section { margin-top: 12px; padding-top: 10px; border-top: 1px dashed #e5e7eb; }
     .modal-section-label { font-size: 10px; font-weight: 700; color: #9ca3af; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
     .modal-readonly input { background: #f9fafb; color: #6b7280; }
+    .fin-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; margin-right: 6px; text-transform: none; letter-spacing: 0; }
+    .fin-badge-proposal { background: #fce7f3; color: #be185d; }
+    .fin-badge-live     { background: #dbeafe; color: #1e40af; }
+    .fin-badge-end      { background: #d1fae5; color: #065f46; }
     .modal-actions { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; }
     .modal-actions .btn-del { margin-right: auto; }
 
@@ -816,31 +820,59 @@ Click ⓘ in the header for the full list of things I can do.</div>
         </div>
       </div>
 
-      <div class="modal-section">
-        <div class="modal-section-label">Costs &amp; budget</div>
-        <div id="m-rollup-notice" style="display:none; font-size:11px; color:#92400e; background:#fef3c7; padding:6px 10px; border-radius:6px; margin-bottom:8px;">
-          ⌃ This row has children — costs below show the rolled-up sum and can't be edited directly. Edit subtasks to change them.
-        </div>
-        <div class="modal-grid">
-          <label>Estimated Cost ($) <span style="font-weight:400; color:#9ca3af;">— this is your budget</span><input id="m-est-cost" type="number" step="0.01" placeholder="0.00"></label>
-          <label>Cost to Date ($)<input id="m-cost-date" type="number" step="0.01" placeholder="0.00"></label>
-        </div>
-        <div class="modal-grid">
-          <label class="modal-readonly">Cost Variance ($)<input id="m-cost-variance" type="number" step="0.01" readonly></label>
-          <label>&nbsp;</label>
-        </div>
-        <div id="m-budget-status" style="font-size:11px; padding:6px 10px; border-radius:6px; margin-top:6px; display:none;"></div>
-        <p style="font-size:10px;color:#9ca3af;margin-top:6px;">Cost Variance = Cost-to-Date − Estimated.  Estimated Cost is treated as the budget for the over/under indicator.</p>
+      <!-- ═════ Financial sections (lifecycle-grouped) ═════════════════════
+           Visibility rules applied by applyFinancialSectionVisibility():
+             • Project rows: show Proposal + Live + End-of-project
+             • Task    rows: show Live only (read-only, rolled up)
+             • Subtask rows: show Live only (editable on leaves)
+      -->
+      <div id="m-rollup-notice" style="display:none; font-size:11px; color:#92400e; background:#fef3c7; padding:6px 10px; border-radius:6px; margin-bottom:8px;">
+        ⌃ This row has children — dates and costs below show the rolled-up sum. Edit subtasks to change them.
       </div>
 
-      <!-- Project-only sale/margin section -->
-      <div class="modal-section" id="m-sale-section">
-        <div class="modal-section-label">Sale &amp; margin (projects only)</div>
+      <!-- Proposal stage — project only -->
+      <div class="modal-section" id="m-fin-proposal">
+        <div class="modal-section-label">
+          <span class="fin-badge fin-badge-proposal">Proposal stage</span>
+          <span style="font-weight:400;color:#9ca3af;font-size:11px;">— set once at start</span>
+        </div>
         <div class="modal-grid">
           <label>Sale Price ($)<input id="m-sale-price" type="number" step="0.01" placeholder="0.00"></label>
-          <label class="modal-readonly">Final Margin ($)<input id="m-margin" type="number" step="0.01" readonly></label>
+          <label>Estimated Raw Cost ($)<input id="m-estimated-raw-cost" type="number" step="0.01" placeholder="0.00"></label>
         </div>
-        <p style="font-size:10px;color:#9ca3af;margin-top:4px;">Final Margin = Sale Price − Cost to Date (rolled up from all subtasks).</p>
+        <div class="modal-grid">
+          <label class="modal-readonly">Project Margin ($)<input id="m-project-margin" type="number" step="0.01" readonly></label>
+          <label>&nbsp;</label>
+        </div>
+      </div>
+
+      <!-- Live (rolled up) — visible at every level; editable only on subtask leaves -->
+      <div class="modal-section" id="m-fin-live">
+        <div class="modal-section-label">
+          <span class="fin-badge fin-badge-live">Live</span>
+          <span id="m-fin-live-hint" style="font-weight:400;color:#9ca3af;font-size:11px;"></span>
+        </div>
+        <div class="modal-grid">
+          <label>Quoted Cost ($)<input id="m-quoted-cost" type="number" step="0.01" placeholder="0.00"></label>
+          <label>Actual Spend to Date ($)<input id="m-actual-spend" type="number" step="0.01" placeholder="0.00"></label>
+        </div>
+        <div class="modal-grid">
+          <label>Committed to Spend ($)<input id="m-committed" type="number" step="0.01" placeholder="0.00"></label>
+          <label class="modal-readonly">Variance ($)<input id="m-variance" type="number" step="0.01" readonly></label>
+        </div>
+        <p style="font-size:10px;color:#9ca3af;margin-top:6px;">Variance = Quoted Cost − (Actual Spend + Committed). Negative means projected overrun.</p>
+      </div>
+
+      <!-- End of project — project only -->
+      <div class="modal-section" id="m-fin-end">
+        <div class="modal-section-label">
+          <span class="fin-badge fin-badge-end">End of project</span>
+          <span style="font-weight:400;color:#9ca3af;font-size:11px;">— locks when every subtask is Done</span>
+        </div>
+        <div class="modal-grid">
+          <label class="modal-readonly">Final Margin ($)<input id="m-final-margin" type="number" step="0.01" readonly></label>
+          <label>&nbsp;</label>
+        </div>
       </div>
 
       <!-- Sharing — shown only when editing a project the current user owns (or admin). -->
@@ -4811,10 +4843,9 @@ Phase                                Dur (d)   Predecessor
     const isProject = rowType === 'project';
     const isParent = NODES.some(x => parentOf(x.id) === idForCheck && idForCheck);
     const notice = document.getElementById('m-rollup-notice');
-    const saleSection = document.getElementById('m-sale-section');
 
-    // Sale/margin section is only relevant for projects
-    saleSection.style.display = isProject ? '' : 'none';
+    // Lifecycle-grouped financial sections — show/hide per row type.
+    applyFinancialSectionVisibility(rowType, isParent);
 
     // Sharing section: visible only when editing an EXISTING project row that
     // the current user owns (or is admin). Hidden for tasks/subtasks and for
@@ -4845,25 +4876,9 @@ Phase                                Dur (d)   Predecessor
       }
     }
 
+    // ── Date editability (cost fields are handled by applyFinancialSectionVisibility) ──
     if (isParent) {
       const tempNode = { ...n, id: idForCheck };
-      document.getElementById('m-est-cost').value   = eEst(tempNode).toFixed(2);
-      document.getElementById('m-cost-date').value  = eSpent(tempNode).toFixed(2);
-      // Sale Price is NOT rolled up — it stays manual on the project row
-      document.getElementById('m-sale-price').value = n.sale_price ?? '';
-      ['m-est-cost','m-cost-date'].forEach(id => {
-        const el = document.getElementById(id);
-        el.readOnly = true;
-        el.style.background = '#f9fafb';
-        el.style.color = '#6b7280';
-      });
-      // Sale Price stays editable for projects even when they have child tasks
-      const saleEl = document.getElementById('m-sale-price');
-      saleEl.readOnly = false;
-      saleEl.style.background = 'white';
-      saleEl.style.color = '#111827';
-
-      // Dates roll up from descendants — show the computed values and lock the fields
       const range = eDateRange(tempNode);
       document.getElementById('m-sched-start').value  = range.schedStart;
       document.getElementById('m-sched-end').value    = range.schedEnd;
@@ -4878,16 +4893,6 @@ Phase                                Dur (d)   Predecessor
       notice.innerHTML = '⌃ This row has children — dates and costs roll up from them. Edit a subtask to change them.';
       notice.style.display = '';
     } else {
-      document.getElementById('m-est-cost').value   = n.est_cost ?? '';
-      document.getElementById('m-cost-date').value  = n.cost_to_date ?? '';
-      document.getElementById('m-sale-price').value = n.sale_price ?? '';
-      ['m-est-cost','m-cost-date','m-sale-price'].forEach(id => {
-        const el = document.getElementById(id);
-        el.readOnly = false;
-        el.style.background = 'white';
-        el.style.color = '#111827';
-      });
-      // Dates editable on leaves
       ['m-sched-start','m-sched-end','m-actual-start','m-actual-end'].forEach(id => {
         const el = document.getElementById(id);
         el.readOnly = false;
@@ -4897,15 +4902,41 @@ Phase                                Dur (d)   Predecessor
       notice.style.display = 'none';
     }
 
+    // ── Populate financial fields (new model) ──
+    {
+      const tempNode = { ...n, id: idForCheck };
+      if (rowType === 'project') {
+        document.getElementById('m-sale-price').value         = n.sale_price ?? '';
+        document.getElementById('m-estimated-raw-cost').value = n.estimated_raw_cost ?? '';
+        document.getElementById('m-project-margin').value     = computeProjectMargin(tempNode);
+        document.getElementById('m-final-margin').value       = computeFinalMargin(tempNode);
+      }
+      // Live fields — rolled-up for parents, stored for leaves. For parents
+      // we hide a true 0 sum (matching spec: missing inputs show blank, not $0).
+      if (isParent) {
+        const q = eQuoted(tempNode), a = eActual(tempNode), c = eCommitted(tempNode);
+        document.getElementById('m-quoted-cost').value  = q ? q.toFixed(2) : '';
+        document.getElementById('m-actual-spend').value = a ? a.toFixed(2) : '';
+        document.getElementById('m-committed').value    = c ? c.toFixed(2) : '';
+      } else {
+        document.getElementById('m-quoted-cost').value  = n.quoted_cost ?? '';
+        document.getElementById('m-actual-spend').value = n.actual_spend_to_date ?? '';
+        document.getElementById('m-committed').value    = n.committed_to_spend ?? '';
+      }
+      document.getElementById('m-variance').value       = computeVariance(tempNode);
+    }
+
     // Predecessors are only meaningful on subtasks (the leaves)
     const isSubtask = rowType === 'subtask';
     const predRow = document.getElementById('m-predecessors-row');
     if (predRow) predRow.style.display = isSubtask ? '' : 'none';
 
     refreshComputedFields();
-    document.getElementById('m-est-cost').oninput   = refreshComputedFields;
-    document.getElementById('m-cost-date').oninput  = refreshComputedFields;
-    document.getElementById('m-sale-price').oninput = refreshComputedFields;
+    ['m-sale-price','m-estimated-raw-cost','m-quoted-cost','m-actual-spend','m-committed']
+      .forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.oninput = refreshComputedFields;
+      });
 
     // ── Edit gate ──
     // For existing rows (modalIdx >= 0): if the user can't edit this row's
@@ -5145,35 +5176,20 @@ Phase                                Dur (d)   Predecessor
     } catch (_) { flashHint('Revoke failed'); }
   }
 
+  /* Live-recompute project_margin (sale − estimated raw cost) and variance
+     (quoted − actual − committed) as the user types. Final margin depends on
+     subtask states and only refreshes when openEdit re-populates the modal. */
   function refreshComputedFields() {
-    const est = parseFloat(document.getElementById('m-est-cost').value);
-    const ctd = parseFloat(document.getElementById('m-cost-date').value);
-    const sp  = parseFloat(document.getElementById('m-sale-price').value);
+    const sp = parseFloat(document.getElementById('m-sale-price')?.value)         || 0;
+    const rc = parseFloat(document.getElementById('m-estimated-raw-cost')?.value) || 0;
+    const q  = parseFloat(document.getElementById('m-quoted-cost')?.value)  || 0;
+    const a  = parseFloat(document.getElementById('m-actual-spend')?.value) || 0;
+    const c  = parseFloat(document.getElementById('m-committed')?.value)    || 0;
 
-    // Cost Variance = Cost-to-Date − Estimated (positive = over the estimate / over budget)
-    document.getElementById('m-cost-variance').value = (isNaN(est) || isNaN(ctd)) ? '' : (ctd - est).toFixed(2);
-    // Margin: only meaningful on projects, computed consistently
-    document.getElementById('m-margin').value = (isNaN(sp) || isNaN(ctd)) ? '' : (sp - ctd).toFixed(2);
-
-    // Budget status banner — Estimated Cost IS the budget
-    const banner = document.getElementById('m-budget-status');
-    if (isNaN(est) || isNaN(ctd)) {
-      banner.style.display = 'none';
-    } else {
-      const diff = ctd - est;
-      const fmt = '$' + Math.abs(diff).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
-      if (diff > 0) {
-        banner.style.cssText = 'font-size:11px; padding:6px 10px; border-radius:6px; margin-top:6px; background:#fef2f2; color:#b91c1c; border:1px solid #fecaca;';
-        banner.innerHTML = `⚠ <b>Over budget</b> by ${fmt}`;
-      } else if (diff < 0) {
-        banner.style.cssText = 'font-size:11px; padding:6px 10px; border-radius:6px; margin-top:6px; background:#f0fdf4; color:#166534; border:1px solid #bbf7d0;';
-        banner.innerHTML = `✓ <b>Under budget</b> by ${fmt}`;
-      } else {
-        banner.style.cssText = 'font-size:11px; padding:6px 10px; border-radius:6px; margin-top:6px; background:#f3f4f6; color:#374151; border:1px solid #d1d5db;';
-        banner.innerHTML = `On budget — exact match`;
-      }
-      banner.style.display = '';
-    }
+    const pm = document.getElementById('m-project-margin');
+    const va = document.getElementById('m-variance');
+    if (pm) pm.value = (sp || rc) ? (sp - rc).toFixed(2) : '';
+    if (va) va.value = (q || a || c) ? (q - a - c).toFixed(2) : '';
   }
 
   function openPredecessorsPicker() {
@@ -5256,6 +5272,45 @@ Phase                                Dur (d)   Predecessor
   }
 
   // recalcSaleFromMargin removed — Sale Price is now entered manually for projects.
+
+  /* Show/hide the three financial sections based on row type.
+       project → all three. task → live only (read-only). subtask → live only
+       (editable for leaves; read-only when the subtask itself has children). */
+  function applyFinancialSectionVisibility(rowType, isParent) {
+    const propEl = document.getElementById('m-fin-proposal');
+    const liveEl = document.getElementById('m-fin-live');
+    const endEl  = document.getElementById('m-fin-end');
+    const hintEl = document.getElementById('m-fin-live-hint');
+    if (propEl) propEl.style.display = (rowType === 'project') ? '' : 'none';
+    if (endEl)  endEl.style.display  = (rowType === 'project') ? '' : 'none';
+    if (liveEl) liveEl.style.display = '';
+
+    // Editability of the three Live inputs:
+    //   - subtask without children → editable
+    //   - everything else (task, project, parent subtask) → read-only (rolled up)
+    const editableLive = (rowType === 'subtask') && !isParent;
+    ['m-quoted-cost','m-actual-spend','m-committed'].forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.readOnly = !editableLive;
+      el.style.background = editableLive ? 'white' : '#f9fafb';
+      el.style.color      = editableLive ? '#111827' : '#6b7280';
+    });
+    // Sale Price + Estimated Raw Cost: editable only on the project row itself.
+    ['m-sale-price','m-estimated-raw-cost'].forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const editable = (rowType === 'project');
+      el.readOnly = !editable;
+      el.style.background = editable ? 'white' : '#f9fafb';
+      el.style.color      = editable ? '#111827' : '#6b7280';
+    });
+    if (hintEl) {
+      hintEl.textContent = editableLive
+        ? '— enter actuals on each subtask; parent rows show the rolled-up sum'
+        : '— rolled up from subtasks';
+    }
+  }
 
   function openEdit(nodeIdx) {
     if (drag) return;
@@ -5380,7 +5435,11 @@ Phase                                Dur (d)   Predecessor
       sched_start: today, sched_end: monthLater,
       actual_start: today, actual_end: monthLater,
       slack: '', percent_done: 0,
-      est_cost: '', cost_to_date: '', sale_price: '',
+      // Legacy (cleared on save by saveModal anyway):
+      est_cost: '', cost_to_date: '',
+      // New financial model:
+      sale_price: '', estimated_raw_cost: '',
+      quoted_cost: '', actual_spend_to_date: '', committed_to_spend: '',
     });
     document.getElementById('modalDelBtn').style.display = 'none';
     document.getElementById('modal').style.display = 'flex';
@@ -5433,11 +5492,19 @@ Phase                                Dur (d)   Predecessor
       // input is read-only for parents, but skip persisting it regardless so
       // the row is unambiguous in storage.
       percent_done: isParent ? '' : clampPercent(document.getElementById('m-percent-done').value),
-      // For parent rows: Est / Cost roll up from children — don't persist their values
-      est_cost:     isParent ? '' : document.getElementById('m-est-cost').value,
-      cost_to_date: isParent ? '' : document.getElementById('m-cost-date').value,
-      // Sale Price lives only on the project row; keep what's typed (manual entry, no roll-up)
-      sale_price:   typeFromId(id) === 'project' ? document.getElementById('m-sale-price').value : '',
+      // Financial fields — new model.
+      //   Project: sale_price + estimated_raw_cost are manual; live fields are derived (don't persist).
+      //   Task:    everything derived (don't persist).
+      //   Subtask (leaf): quoted_cost / actual_spend_to_date / committed_to_spend are manual.
+      sale_price:           rowType === 'project' ? document.getElementById('m-sale-price').value : '',
+      estimated_raw_cost:   rowType === 'project' ? document.getElementById('m-estimated-raw-cost').value : '',
+      quoted_cost:          (rowType === 'subtask' && !isParent) ? document.getElementById('m-quoted-cost').value  : '',
+      actual_spend_to_date: (rowType === 'subtask' && !isParent) ? document.getElementById('m-actual-spend').value : '',
+      committed_to_spend:   (rowType === 'subtask' && !isParent) ? document.getElementById('m-committed').value    : '',
+      // Legacy fields — cleared on save so storage stays clean. The migration shim
+      // already copied them into the new fields on the previous load.
+      est_cost:     '',
+      cost_to_date: '',
       collapsed:    modalIdx >= 0 ? NODES[modalIdx].collapsed : false,
     };
 
