@@ -584,7 +584,7 @@
       <div>• <b>Predecessors:</b> comma-separated list of IDs that must finish before this one can start (Finish-to-Start). A subtask's status is locked at "Not Started" until every predecessor reaches "Done".</div>
       <div>• <b>Buffer (days):</b> how many days a subtask can be delayed without delaying the project end. Buffer = 0 → critical path (★).</div>
       <div>• <b>Critical path:</b> the chain of subtasks with Buffer = 0 (★). Any delay on these slips the project finish — focus management attention here.</div>
-      <div>• <b>Status:</b> only editable on subtasks. Pick one of Not Started / In Progress / Delayed / Done. Tasks and projects roll up by priority (any Delayed → Delayed; else any In Progress → In Progress; else all Done → Done; else Not Started). Picking "Delayed" prompts for a new end date and reschedules downstream tasks.</div>
+      <div>• <b>Status:</b> only editable on subtasks. Pick one of Not Started / In Progress / Delayed / Done. Tasks and projects roll up by priority — <i>any Delayed → Delayed; else all Done → Done; else any Done or any In Progress → In Progress (work has begun); else Not Started</i>. Picking "Delayed" prompts for a new end date and reschedules downstream tasks.</div>
       <div>• <b>Variance =</b> Quoted Cost − (Actual Spend + Committed). Negative means projected overrun.</div>
       <div>• <b>Project Margin =</b> Sale Price − Estimated Raw Cost (proposal-stage). <b>Final Margin =</b> Sale Price − (Actual + Committed), locked when every subtask is Done.</div>
       <div>• <b>Row grouping:</b> use the ▾/▸ arrows next to project/task rows to collapse subtasks, or "⊟ Collapse" in the toolbar.</div>
@@ -3777,10 +3777,10 @@ Phase                                Dur (d)   Predecessor
   /* Status derives from the explicit per-subtask `status` field.
        • Subtask (leaf): returns its stored status (defaults to 'Not Started').
        • Task / Project: priority-rule rollup of descendant subtasks:
-             any Delayed → 'Delayed'
-         else any In Progress → 'In Progress'
-         else all Done → 'Done'
-         else 'Not Started'.
+             any Delayed                       → 'Delayed'
+         else every subtask is Done            → 'Done'
+         else any Done OR any In Progress      → 'In Progress' (work has begun)
+         else                                  → 'Not Started'
        A project with zero subtasks rolls up to 'Not Started'. */
   function computeStatus(node) {
     // Leaves return their own field.
@@ -3800,10 +3800,10 @@ Phase                                Dur (d)   Predecessor
         }
       }
     })(node);
-    if (subStatuses.length === 0)                       return 'Not Started';
-    if (subStatuses.includes('Delayed'))                return 'Delayed';
-    if (subStatuses.includes('In Progress'))            return 'In Progress';
-    if (subStatuses.every(s => s === 'Done'))           return 'Done';
+    if (subStatuses.length === 0)                                                       return 'Not Started';
+    if (subStatuses.includes('Delayed'))                                                return 'Delayed';
+    if (subStatuses.every(s => s === 'Done'))                                           return 'Done';
+    if (subStatuses.some(s => s === 'Done' || s === 'In Progress'))                     return 'In Progress';
     return 'Not Started';
   }
   // Variance = quoted_cost − (actual_spend_to_date + committed_to_spend).

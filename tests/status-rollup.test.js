@@ -25,10 +25,10 @@ function makeWorld(nodes) {
         }
       }
     })(node);
-    if (subStatuses.length === 0)              return 'Not Started';
-    if (subStatuses.includes('Delayed'))       return 'Delayed';
-    if (subStatuses.includes('In Progress'))   return 'In Progress';
-    if (subStatuses.every(s => s === 'Done'))  return 'Done';
+    if (subStatuses.length === 0)                                                 return 'Not Started';
+    if (subStatuses.includes('Delayed'))                                          return 'Delayed';
+    if (subStatuses.every(s => s === 'Done'))                                     return 'Done';
+    if (subStatuses.some(s => s === 'Done' || s === 'In Progress'))               return 'In Progress';
     return 'Not Started';
   }
   return { computeStatus, byId: new Map(nodes.map(n => [n.id, n])) };
@@ -74,6 +74,17 @@ describe('computeStatus priority rollup', () => {
     ]);
     assert.equal(computeStatus(byId.get('P1-T1')), 'Done');
     assert.equal(computeStatus(byId.get('P1')),    'Done');
+  });
+
+  it('some Done + some Not Started (none In Progress) → parent is In Progress (work has begun)', () => {
+    const { computeStatus, byId } = makeWorld([
+      { id: 'P1' }, { id: 'P1-T1' },
+      { id: 'P1-T1-S1', status: 'Done' },
+      { id: 'P1-T1-S2', status: 'Not Started' },
+      { id: 'P1-T1-S3', status: 'Not Started' },
+    ]);
+    assert.equal(computeStatus(byId.get('P1-T1')), 'In Progress');
+    assert.equal(computeStatus(byId.get('P1')),    'In Progress');
   });
 
   it('all subtasks Not Started → parent is Not Started', () => {
