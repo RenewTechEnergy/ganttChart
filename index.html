@@ -248,6 +248,16 @@
     #aiToggleBtn:hover { background: #6d28d9; }
     body.signed-out #aiToggleBtn,
     body.signed-out #ai-panel { display: none !important; }
+    /* Chat content must be selectable so users can copy messages.
+       body { user-select: none } higher up the tree blocks selection
+       for the whole app — re-enable inside the chat scroll area only. */
+    #ai-panel .ai-log,
+    #ai-panel .ai-log *,
+    #ai-panel .ai-preview,
+    #ai-panel .ai-preview * {
+      user-select: text;
+      -webkit-user-select: text;
+    }
     #ai-panel {
       position: fixed; right: -460px; top: 56px; bottom: 0; width: 440px;
       background: white; border-left: 1px solid #e5e7eb; z-index: 9100;
