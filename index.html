@@ -4354,6 +4354,9 @@ Phase                                Dur (d)   Predecessor
     } catch (e) {
       console.warn('[ru] count fetch failed', e);
     }
+    // Bail if the admin closed or switched targets while we were awaiting.
+    if (_ruTarget?.user_id !== userId) return;
+    _ruTarget.ownedCount = ownedCount;
     document.getElementById('ru-counts').textContent =
       `Owns ${ownedCount} project(s) · Has ${sharesCount} project share(s).`;
     document.getElementById('ru-owned-count').textContent = String(ownedCount);
@@ -4396,7 +4399,7 @@ Phase                                Dur (d)   Predecessor
 
     // If owned-count > 0, require a selection. Otherwise pass through any
     // admin id (the server enforces userId !== reassignTo too).
-    const ownedCount = parseInt(document.getElementById('ru-owned-count').textContent || '0', 10);
+    const ownedCount = _ruTarget.ownedCount || 0;
     let reassignTo = document.getElementById('ru-reassign-pick').value;
     if (!reassignTo) {
       if (ownedCount > 0) {
@@ -4408,6 +4411,12 @@ Phase                                Dur (d)   Predecessor
       // No projects to reassign — pass the current admin's own id; server
       // will accept since the reassign is a no-op (zero rows updated).
       reassignTo = window.Supa.currentUserId();
+      if (!reassignTo) {
+        errEl.textContent = 'Session expired. Sign in again before removing users.';
+        errEl.style.display = '';
+        btn.disabled = false;
+        return;
+      }
     }
 
     try {
