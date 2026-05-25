@@ -4451,14 +4451,18 @@ Phase                                Dur (d)   Predecessor
       }
     }
 
+    // Capture before the await — `_ruTarget` is nulled by closeRemoveUserModal()
+    // (and by the backdrop/Cancel click), so reading it after the await can
+    // throw if the admin cancels mid-flight.
+    const targetEmail = _ruTarget.email;
+    const targetUserId = _ruTarget.user_id;
     try {
-      const out = await window.Supa.deleteUser(_ruTarget.user_id, reassignTo);
-      const email = _ruTarget.email;
+      const out = await window.Supa.deleteUser(targetUserId, reassignTo);
       const reassigned = out?.reassigned_projects ?? 0;
       closeRemoveUserModal();
       _usersCache = await window.Supa.listAllProfiles();
       renderUsersList();
-      flashHint(`Removed ${email}${reassigned ? ` · reassigned ${reassigned} project(s)` : ''}`);
+      flashHint(`Removed ${targetEmail}${reassigned ? ` · reassigned ${reassigned} project(s)` : ''}`);
     } catch (e) {
       errEl.textContent = e?.message || 'Remove failed.';
       errEl.style.display = '';
