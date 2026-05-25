@@ -5977,12 +5977,18 @@ Phase                                Dur (d)   Predecessor
 
   async function confirmImport() {
     if (!importState) return;
+    // Claim the state immediately so a second click during the await
+    // gap below can't re-enter. updateImportFooter re-enables the
+    // confirm button on checkbox changes, which would otherwise allow a
+    // second invocation to operate on partially-mutated state.
+    const state = importState;
+    importState = null;
     const btn = document.getElementById('im-confirm');
     btn.disabled = true;
 
     // Partition imported nodes by project resolution.
     const importedByProj = new Map();
-    for (const n of importState.importedNodes) {
+    for (const n of state.importedNodes) {
       const pid = (n.type === 'project') ? n.id : (n.id || '').split('-')[0];
       if (!importedByProj.has(pid)) importedByProj.set(pid, []);
       importedByProj.get(pid).push(n);
@@ -5995,7 +6001,7 @@ Phase                                Dur (d)   Predecessor
     // 1. Walk per-project rows.
     const overwriteProjectIds = [];
     const asNewProjects = [];        // arrays of node-arrays, one per project, for renumber pass
-    for (const r of importState.rows) {
+    for (const r of state.rows) {
       if (!r.included || (r.conflict && r.resolution === 'keep')) continue;
       const projNodes = importedByProj.get(r.id) || [];
 
@@ -6060,7 +6066,7 @@ Phase                                Dur (d)   Predecessor
     if (skipped) console.warn(`[import] skipped ${skipped} duplicate id(s)`);
 
     // 5. Selection + editable-set fixups (mirrors original handler).
-    for (const r of importState.rows) {
+    for (const r of state.rows) {
       if (!r.included || (r.conflict && r.resolution === 'keep')) continue;
       // Determine the final project id we just pushed.
       let finalPid = r.id;
@@ -6071,8 +6077,8 @@ Phase                                Dur (d)   Predecessor
       if (window.__editableProjectIds) window.__editableProjectIds.add(finalPid);
     }
 
-    const fileName = importState.fileName;
-    const importedCount = rewritten.length;
+    const fileName = state.fileName;
+    const importedCount = rewritten.length - skipped;
     closeImportModal();
     saveLocal(); populateFilters(); render();
     flashHint(`📥 Imported ${importedCount} row${importedCount === 1 ? '' : 's'} from ${fileName}`);
