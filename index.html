@@ -2062,6 +2062,34 @@ Click ⓘ in the header for the full list of things I can do.</div>
       try { return JSON.parse(text); } catch { return { ok: true }; }
     }
 
+    // ─── Admin: remove a user via the delete-user edge function ───
+    // Reassigns the user's owned projects to <reassignTo>, clears their
+    // shares, deletes their profile, and deletes their auth account.
+    // Returns { ok, reassigned_projects, removed_shares }. Throws on error.
+    async function deleteUser(userId, reassignTo) {
+      const useLocal = SUPA_CONFIG.useLocalEdge === true;
+      const base   = useLocal ? SUPA_CONFIG.localFunctionsBase  : SUPA_CONFIG.supabaseUrl;
+      const apikey = useLocal ? SUPA_CONFIG.localPublishableKey : SUPA_CONFIG.publishableKey;
+      const token  = supaToken || apikey;
+      const url    = `${base}/functions/v1/delete-user`;
+      const res = await loggedFetch(url, {
+        method: "POST",
+        headers: {
+          "apikey": apikey,
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ user_id: userId, reassign_to: reassignTo }),
+      });
+      const text = await res.text().catch(() => "");
+      if (!res.ok) {
+        let msg = text;
+        try { msg = JSON.parse(text)?.error || text; } catch (_) {}
+        throw new Error(msg || `HTTP ${res.status}`);
+      }
+      try { return JSON.parse(text); } catch { return { ok: true }; }
+    }
+
     window.Supa = {
       signIn, verifyCode, cancelCode, signOut, loadBoard,
       cardSignIn, cardVerifyCode, cardCancelCode,
@@ -2070,7 +2098,7 @@ Click ⓘ in the header for the full list of things I can do.</div>
       lookupUserByEmail, listShares, addShare, updateShare, removeShare,
       fetchProjectOwner, refreshEditableProjects, isInCloud,
       // admin
-      listAllProfiles, setUserRole, inviteUser,
+      listAllProfiles, setUserRole, inviteUser, deleteUser,
       // ai
       invokeChat,
       // exposed for the share UI
