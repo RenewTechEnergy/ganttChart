@@ -3415,22 +3415,39 @@ Phase                                Dur (d)   Predecessor
     if (schedEnd && actualStart && new Date(schedEnd) < today) return 'At Risk';
     return isCriticalPath(node) ? 'Critical' : 'In Progress';
   }
-  // Cost Variance = Cost-to-Date − Estimated (uses rolled-up values for parents)
+  // Variance = quoted_cost − (actual_spend_to_date + committed_to_spend).
+  // Uses rolled-up values for parents. Returns '' when all three sources empty.
   function computeVariance(node) {
-    const est = eEst(node), ctd = eSpent(node);
-    if (!est && !ctd) return '';
-    return (ctd - est).toFixed(2);
+    const q = eQuoted(node), a = eActual(node), c = eCommitted(node);
+    if (!q && !a && !c) return '';
+    return (q - a - c).toFixed(2);
   }
-  // Margin: projects use Sale − Cost (profit). Tasks/subtasks use Est − Cost ("budget left").
+  // Project Margin (proposal-stage) = sale_price − estimated_raw_cost.
+  // Only meaningful at project level. Tasks/subtasks return ''.
+  function computeProjectMargin(node) {
+    if (typeFromId(node.id) !== 'project') return '';
+    const sp = eSale(node), rc = eRawCost(node);
+    if (!sp && !rc) return '';
+    return (sp - rc).toFixed(2);
+  }
+  // Final Margin (end-of-project, locked) = sale_price − (actual + committed).
+  // Returns '' until every subtask of this project has pct_done === 100.
+  // PR2 switches this to status === 'Done'.
+  function computeFinalMargin(node) {
+    if (typeFromId(node.id) !== 'project') return '';
+    const subs = NODES.filter(n =>
+      typeFromId(n.id) === 'subtask' && n.id.split('-')[0] === node.id
+    );
+    if (subs.length === 0) return '';
+    const allDone = subs.every(s => Number(s.percent_done) >= 100);
+    if (!allDone) return '';
+    const sp = eSale(node), a = eActual(node), c = eCommitted(node);
+    if (!sp && !a && !c) return '';
+    return (sp - a - c).toFixed(2);
+  }
+  // Backwards-compat alias for any remaining `computeMargin` callers; remove in PR3 cleanup.
   function computeMargin(node) {
-    if (typeFromId(node.id) === 'project') {
-      const sp = eSale(node), ctd = eSpent(node);
-      if (!sp && !ctd) return '';
-      return (sp - ctd).toFixed(2);
-    }
-    const est = eEst(node), ctd = eSpent(node);
-    if (!est && !ctd) return '';
-    return (est - ctd).toFixed(2);
+    return computeProjectMargin(node) || '';
   }
   function colorFor(node) {
     return STATUS_COLORS[computeStatus(node)] || '#6b7280';
