@@ -2941,7 +2941,11 @@ Phase                                Dur (d)   Predecessor
       sched_start: fmtDate(projStart), sched_end: fmtDate(projEnd),
       actual_start: fmtDate(projStart), actual_end: fmtDate(projEnd),
       slack: '', percent_done: 0,
-      est_cost: '', cost_to_date: '', sale_price: '',
+      // New financial model:
+      estimated_raw_cost: '', sale_price: '',
+      quoted_cost: '', actual_spend_to_date: '', committed_to_spend: '',
+      // Legacy fields (kept blank; shim handles older saved boards):
+      est_cost: '', cost_to_date: '',
       collapsed: false,
     });
 
@@ -2969,7 +2973,11 @@ Phase                                Dur (d)   Predecessor
         sched_start: fmtDate(tStart), sched_end: fmtDate(tEnd),
         actual_start: fmtDate(tStart), actual_end: fmtDate(tEnd),
         slack: '', percent_done: 0,
-        est_cost: '', cost_to_date: '', sale_price: '',
+        // New financial model:
+        estimated_raw_cost: '', sale_price: '',
+        quoted_cost: '', actual_spend_to_date: '', committed_to_spend: '',
+        // Legacy fields (kept blank):
+        est_cost: '', cost_to_date: '',
         collapsed: false,
       });
       tasksInPhase.forEach((t, si) => {
@@ -2984,7 +2992,11 @@ Phase                                Dur (d)   Predecessor
           actual_start: fmtDate(sStart), actual_end: fmtDate(sEnd),
           slack: String(result.slack[t.tid]),
           percent_done: 0,
-          est_cost: '', cost_to_date: '', sale_price: '',
+          // New financial model:
+          estimated_raw_cost: '', sale_price: '',
+          quoted_cost: '', actual_spend_to_date: '', committed_to_spend: '',
+          // Legacy fields (kept blank):
+          est_cost: '', cost_to_date: '',
           collapsed: false,
         });
       });
