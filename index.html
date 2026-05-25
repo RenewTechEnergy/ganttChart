@@ -503,8 +503,8 @@
       <button class="vt-btn"          data-mode="scheduled" onclick="setViewMode('scheduled')">🗓 Scheduled</button>
     </span>
     <button class="btn" id="todayBtn" style="background:#dc2626;color:white" onclick="focusToday()" title="Toggle focus on tasks currently in progress">🎯 Today's tasks</button>
-    <label style="font-size:11px; color:#374151; display:flex; align-items:center; gap:4px; margin-left:6px;" title="Clamp displayed slack to at most this many days. Leave empty for no cap.">
-      Max slack (d):
+    <label style="font-size:11px; color:#374151; display:flex; align-items:center; gap:4px; margin-left:6px;" title="Clamp displayed buffer to at most this many days. Leave empty for no cap.">
+      Max buffer (d):
       <input type="number" id="maxSlackCap" min="0" placeholder="∞"
              style="width:50px; padding:2px 4px; font-size:11px; border:1px solid #d1d5db; border-radius:4px;"
              onchange="onMaxSlackChange()">
@@ -515,7 +515,8 @@
     <button class="btn btn-save" id="saveBtn" onclick="manualCloudSave()" title="Push edits to Supabase now">💾 Save</button>
     <button class="btn btn-mine" id="mineBtn" onclick="toggleMineFilter()" title="Show only projects you can edit">👤 Mine</button>
     <button class="btn btn-users" id="usersBtn" onclick="openManageUsersModal()" title="Assign admin / user / viewer roles" style="display:none; background:#7c3aed; color:white;">⚙ Users</button>
-    <button class="btn btn-xlsx" onclick="exportCSV()" title="Download a CSV snapshot">📄 Export CSV</button>
+    <button class="btn btn-xlsx" onclick="exportCSV()" title="Download a CSV snapshot (full round-trip)">📄 Export CSV</button>
+    <button class="btn" style="background:#0ea5e9;color:white;" onclick="exportSummaryCSV()" title="Download a summary of the currently-visible rows (financial + status, suitable for sharing)">📊 Summary CSV</button>
     <button class="btn btn-reset" onclick="clearGantt()" title="Wipe every row from the chart (and from the cloud if signed in)">🗑 Clear</button>
     <button class="btn" style="background:#7c3aed;color:white;" onclick="recalcAll()" title="Optimise — ASAP compression: snap every task to its earliest possible start so the project finishes as soon as possible">🚀 Optimise</button>
     <button class="btn btn-add-p" onclick="openAdd('project')">+ Project</button>
@@ -579,13 +580,12 @@
       <div style="font-weight:700; color:#374151; margin-bottom:6px;">Notes</div>
       <div>• <b>Hierarchy:</b> Project (P) ▸ Task (P-T) ▸ Subtask (P-T-S). Edit subtask data; tasks and projects roll up automatically (earliest start, latest end, summed costs).</div>
       <div>• <b>Scheduled vs Actual:</b> <b>Scheduled</b> dates are the plan — set when a row is created and only changed by opening the edit modal. <b>Actual</b> dates track what really happened (or is happening). Dragging a bar shifts <b>actual</b> dates only; the schedule stays put as a baseline to measure delay against.</div>
-      <div>• <b>Predecessors:</b> comma-separated list of IDs that must finish before this one can start (Finish-to-Start). A subtask's <b>% Done</b> is locked at 0 until every predecessor reaches 100% — its rolled-up parents (task, project) also stay at 0 to reflect that no work can have begun yet.</div>
-      <div>• <b>Slack (days):</b> how many days a subtask can be delayed without delaying the project end. Slack = 0 → critical path (★).</div>
-      <div>• <b>Critical path:</b> the chain of subtasks with Slack = 0 (★). Any delay on these slips the project finish — focus management attention here.</div>
-      <div>• <b>Late Start vs Delay:</b> <i>Late Start</i> = scheduled start has passed but nothing has begun (no actual_start, 0%). <i>Delay / At Risk</i> = work has begun and we're past the scheduled end. They never apply at the same time.</div>
-      <div>• <b>% Done:</b> only editable on subtasks. A task's % Done is the est_cost-weighted average of its subtasks; a project's is the weighted average of its tasks. Edit a subtask and the rollup updates immediately. (Falls back to a simple average if no est_cost is set.)</div>
-      <div>• <b>Cost Variance =</b> Cost-to-Date − Estimated. Negative (under budget) is good; positive (over budget) is bad.</div>
-      <div>• <b>Margin =</b> Sale Price − Cost-to-Date. Costs and % Done roll up from subtasks; sale price is set on the project row only.</div>
+      <div>• <b>Predecessors:</b> comma-separated list of IDs that must finish before this one can start (Finish-to-Start). A subtask's status is locked at "Not Started" until every predecessor reaches "Done".</div>
+      <div>• <b>Buffer (days):</b> how many days a subtask can be delayed without delaying the project end. Buffer = 0 → critical path (★).</div>
+      <div>• <b>Critical path:</b> the chain of subtasks with Buffer = 0 (★). Any delay on these slips the project finish — focus management attention here.</div>
+      <div>• <b>Status:</b> only editable on subtasks. Pick one of Not Started / In Progress / Delayed / Done. Tasks and projects roll up by priority (any Delayed → Delayed; else any In Progress → In Progress; else all Done → Done; else Not Started). Picking "Delayed" prompts for a new end date and reschedules downstream tasks.</div>
+      <div>• <b>Variance =</b> Quoted Cost − (Actual Spend + Committed). Negative means projected overrun.</div>
+      <div>• <b>Project Margin =</b> Sale Price − Estimated Raw Cost (proposal-stage). <b>Final Margin =</b> Sale Price − (Actual + Committed), locked when every subtask is Done.</div>
       <div>• <b>Row grouping:</b> use the ▾/▸ arrows next to project/task rows to collapse subtasks, or "⊟ Collapse" in the toolbar.</div>
       <div>• <b>Saving:</b> the CSV download is the session store — reload it next time by attaching the file and re-running the gantt-chart skill.</div>
     </div>
@@ -784,6 +784,36 @@ Click ⓘ in the header for the full list of things I can do.</div>
         </label>
       </div>
       <label>Project / Task / Subtask name<input id="m-name" type="text" placeholder="e.g. 100kW Rooftop Solar"></label>
+
+      <!-- Project-only meta block: RTB code becomes the displayed label;
+           type / sector / installer help downstream SOW selection. -->
+      <div class="modal-section" id="m-project-meta" style="display:none;">
+        <div class="modal-section-label">Project meta</div>
+        <div class="modal-grid">
+          <label>RTB Code <span style="font-weight:400;color:#9ca3af;">— e.g. 2026-pepes ducks mulgrave 1</span>
+            <input id="m-rtb-code" type="text" placeholder="manually entered"></label>
+          <label>Installer Name<input id="m-installer-name" type="text" placeholder="(optional)"></label>
+        </div>
+        <div class="modal-grid">
+          <label>Type of Project
+            <select id="m-project-type">
+              <option value="">—</option>
+              <option value="Solar only">Solar only</option>
+              <option value="Solar and BESS">Solar and BESS</option>
+              <option value="BESS only">BESS only</option>
+              <option value="Heat pump">Heat pump</option>
+            </select>
+          </label>
+          <label>Sector
+            <select id="m-sector">
+              <option value="">—</option>
+              <option value="Residential">Residential</option>
+              <option value="Commercial">Commercial</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
       <div class="modal-grid">
         <label>Owner<input id="m-owner" type="text" placeholder="e.g. Jack Z"></label>
         <div id="m-predecessors-row">
@@ -815,7 +845,7 @@ Click ⓘ in the header for the full list of things I can do.</div>
       <div class="modal-section">
         <div class="modal-section-label">Progress</div>
         <div class="modal-grid">
-          <label>Slack (days)<input id="m-slack" type="number" step="1" placeholder="e.g. 3"></label>
+          <label>Buffer (days)<input id="m-slack" type="number" step="1" placeholder="e.g. 3"></label>
           <label>Status
             <select id="m-status">
               <option value="Not Started">Not Started</option>
@@ -3533,7 +3563,7 @@ Phase                                Dur (d)   Predecessor
     render();
     flashHint(MAX_SLACK_CAP == null
       ? 'Slack cap cleared'
-      : `Slack cap set to ${MAX_SLACK_CAP} day${MAX_SLACK_CAP===1?'':'s'}`);
+      : `Buffer cap set to ${MAX_SLACK_CAP} day${MAX_SLACK_CAP===1?'':'s'}`);
   }
 
   function eSlack(node) {
@@ -4158,41 +4188,43 @@ Phase                                Dur (d)   Predecessor
       if (useStart && useEnd) {
         const sp = pct(useStart), ep = pct(useEnd), w = Math.max(0.5, ep - sp);
         const color = colorFor(n);
-        const pd = ePercentDone(n);
-        const pdLabel = pd % 1 === 0 ? pd.toFixed(0) : pd.toFixed(1);
+        const barStatus = computeStatus(n);
+        // 'Done' bars get full white overlay coverage of nothing; others show some white fill.
+        const overlayPct = barStatus === 'Done' ? 0 : 100;
+        const idForBar = type === 'project' ? (n.rtb_code || n.id) : n.id;
         barsHtml += `
           <div class="g-bar is-${type[0]}" id="bar-${ri}" data-ri="${ri}" data-nodeidx="${nodeIdx}"
                style="left:${sp}%;width:${w}%;background:${color};"
                onmouseenter="tipShow(event,${nodeIdx})" onmouseleave="tipHide()">
-            <div class="progress-fill" style="width:${100 - pd}%; right:0; left:auto; background:rgba(255,255,255,.55);"></div>
+            <div class="progress-fill" style="width:${overlayPct}%; right:0; left:auto; background:rgba(255,255,255,.55);"></div>
             <div class="rh rh-left"  onmousedown="dragStart(event,'left',${ri},${nodeIdx})"></div>
-            <span class="bar-label">${esc(n.id)} · ${pdLabel}%</span>
+            <span class="bar-label">${esc(idForBar)} · ${esc(barStatus)}</span>
             <div class="rh rh-right" onmousedown="dragStart(event,'right',${ri},${nodeIdx})"></div>
           </div>`;
       }
 
       const ownerLabel = n.owner ? `👤 ${esc(n.owner)}` : '';
-      const pdEff      = ePercentDone(n);
-      const pdLabel    = `${pdEff % 1 === 0 ? pdEff.toFixed(0) : pdEff.toFixed(1)}% done${hasKids ? ' ⌃' : ''}`;
-      // Cost chips — Sale only on projects. Estimated Cost is the budget baseline.
-      const effEst  = eEst(n);
-      const effSpent= eSpent(n);
+      const statusLive = computeStatus(n);
       const isParent = childrenOf(n).length > 0;
-      const rollupTag = isParent ? ' <span style="font-size:8px;color:#9ca3af;">⌃</span>' : '';
+      const pdLabel = `<span style="background:${STATUS_COLORS[statusLive]};color:white;padding:1px 6px;border-radius:8px;font-weight:600;">${esc(statusLive)}</span>${isParent ? ' <span style="font-size:8px;color:#9ca3af;">⌃</span>' : ''}`;
+
+      // Lifecycle chips — proposal margin on projects; rolled variance on every row.
       const costBits = [];
-      if (effEst)   costBits.push(`<span title="Estimated Cost / Budget${isParent ? ' (sum of children)' : ''}">Est ${fmtMoney(effEst)}${rollupTag}</span>`);
-      if (effSpent) costBits.push(`<span title="Cost to Date${isParent ? ' (sum of children)' : ''}" style="color:#6b7280;">Spent ${fmtMoney(effSpent)}${rollupTag}</span>`);
-      if (type === 'project' && n.sale_price) {
-        costBits.push(`<span title="Sale Price" style="color:#166534;">Sale ${fmtMoney(n.sale_price)}</span>`);
+      const fmt$ = v => '$' + Number(v).toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:0});
+      const rollupTag = isParent ? ' <span style="font-size:8px;color:#9ca3af;">⌃</span>' : '';
+      if (type === 'project') {
+        if (n.sale_price)         costBits.push(`<span title="Sale Price" style="color:#166534;">Sale ${fmt$(n.sale_price)}</span>`);
+        if (n.estimated_raw_cost) costBits.push(`<span title="Estimated Raw Cost (proposal)">Est ${fmt$(n.estimated_raw_cost)}</span>`);
       }
-      // Over/under budget pill — appears whenever Budget is set
-      const bStat = budgetStatus(n);
-      if (bStat) {
-        const overBg   = bStat.diff > 0 ? 'background:#fef2f2;color:#b91c1c;'
-                       : bStat.diff < 0 ? 'background:#f0fdf4;color:#166534;'
-                       :                  'background:#f3f4f6;color:#374151;';
-        const lbl = bStat.diff > 0 ? '↑ Over' : bStat.diff < 0 ? '↓ Under' : '= On';
-        costBits.push(`<span title="${esc(bStat.label)} by ${fmtMoney(Math.abs(bStat.diff))}" style="${overBg}padding:1px 5px;border-radius:4px;font-weight:600;">${lbl} ${fmtMoney(Math.abs(bStat.diff))}</span>`);
+      const q = eQuoted(n), a = eActual(n), c = eCommitted(n);
+      if (q) costBits.push(`<span title="Quoted Cost${isParent ? ' (sum of subtasks)' : ''}">Quoted ${fmt$(q)}${rollupTag}</span>`);
+      if (a) costBits.push(`<span title="Actual Spend to Date${isParent ? ' (sum of subtasks)' : ''}" style="color:#6b7280;">Actual ${fmt$(a)}${rollupTag}</span>`);
+      if (c) costBits.push(`<span title="Committed to Spend${isParent ? ' (sum of subtasks)' : ''}" style="color:#6b7280;">Committed ${fmt$(c)}${rollupTag}</span>`);
+      const variance = computeVariance(n);
+      if (variance !== '' && Number(variance) !== 0) {
+        const negative = Number(variance) < 0;
+        const bg = negative ? 'background:#fef2f2;color:#b91c1c;' : 'background:#f0fdf4;color:#166534;';
+        costBits.push(`<span title="Variance" style="${bg}padding:1px 5px;border-radius:4px;font-weight:600;">${negative ? '↑' : '↓'} Var ${fmt$(Math.abs(variance))}</span>`);
       }
       const costsHtml = costBits.length ? `<span style="display:flex;gap:8px;flex-wrap:wrap;">${costBits.join('')}</span>` : '';
 
@@ -4220,7 +4252,7 @@ Phase                                Dur (d)   Predecessor
                style="padding-left:${12 + indent}px;"
                onclick="setSelected(${nodeIdx}); openEdit(${nodeIdx})">
             ${collapseBtn}
-            <span class="row-id-badge ${type[0]}">${esc(n.id)}</span>
+            <span class="row-id-badge ${type[0]}">${esc(type === 'project' ? (n.rtb_code || `(no RTB) ${n.id}`) : n.id)}</span>
             <div class="row-text">
               <div class="row-name is-${type[0]}" title="${esc(n.name)}">${namePrefix}${esc(n.name || '(unnamed)')}</div>
               <div class="row-meta">
@@ -4935,6 +4967,62 @@ Phase                                Dur (d)   Predecessor
     markSaved();
   }
 
+  /* Summary CSV — one row per CURRENTLY-VISIBLE row, with rolled-up financials
+       and the new status column. Suitable for sharing/reporting. The existing
+       Export CSV (round-trip format) is left untouched. */
+  function exportSummaryCSV() {
+    const rows = visibleTree();
+    if (!rows.length) { alert('No visible rows to export.'); return; }
+    const csvField = v => {
+      if (v == null || v === '') return '';
+      const s = String(v);
+      return /[,"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    const headers = [
+      'Type','RTB Code','Name','Status','Sale Price','Estimated Raw Cost','Project Margin',
+      'Quoted Cost','Actual Spend to Date','Committed to Spend','Variance','Final Margin',
+      'Scheduled Start','Scheduled End',
+    ];
+    const num = (v) => (v === '' || v == null ? '' : Number(v).toFixed(2));
+    const lines = [headers.map(csvField).join(',')];
+    rows.forEach(n => {
+      const t = typeFromId(n.id);
+      const isParent = childrenOf(n).length > 0;
+      const rng = eDateRange(n);
+      const q = isParent ? eQuoted(n)    : (n.quoted_cost           === '' ? 0 : Number(n.quoted_cost)           || 0);
+      const a = isParent ? eActual(n)    : (n.actual_spend_to_date  === '' ? 0 : Number(n.actual_spend_to_date)  || 0);
+      const c = isParent ? eCommitted(n) : (n.committed_to_spend    === '' ? 0 : Number(n.committed_to_spend)    || 0);
+      const out = {
+        type:                t,
+        rtb_code:            t === 'project' ? (n.rtb_code || '') : '',
+        name:                n.name || '',
+        status:              computeStatus(n),
+        sale_price:          t === 'project' ? num(n.sale_price)         : '',
+        estimated_raw_cost:  t === 'project' ? num(n.estimated_raw_cost) : '',
+        project_margin:      t === 'project' ? computeProjectMargin(n) || '' : '',
+        quoted_cost:         q ? q.toFixed(2) : '',
+        actual_spend:        a ? a.toFixed(2) : '',
+        committed:           c ? c.toFixed(2) : '',
+        variance:            computeVariance(n),
+        final_margin:        t === 'project' ? (computeFinalMargin(n) || '') : '',
+        sched_start:         isParent ? (rng.schedStart || '') : (n.sched_start || ''),
+        sched_end:           isParent ? (rng.schedEnd   || '') : (n.sched_end   || ''),
+      };
+      lines.push([
+        out.type, out.rtb_code, out.name, out.status,
+        out.sale_price, out.estimated_raw_cost, out.project_margin,
+        out.quoted_cost, out.actual_spend, out.committed, out.variance, out.final_margin,
+        out.sched_start, out.sched_end,
+      ].map(csvField).join(','));
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `summary-${fmtDate(new Date())}.csv`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
   function markSaved() {
     dirty = false;
     const badge = document.getElementById('dirtyBadge');
@@ -5108,7 +5196,7 @@ Phase                                Dur (d)   Predecessor
       }
       if (note) {
         if (MAX_SLACK_CAP != null && !isNaN(rawSlack) && rawSlack > MAX_SLACK_CAP) {
-          note.textContent = `Capped to ${MAX_SLACK_CAP} day${MAX_SLACK_CAP===1?'':'s'} by global Max-slack setting`;
+          note.textContent = `Capped to ${MAX_SLACK_CAP} day${MAX_SLACK_CAP===1?'':'s'} by global Max buffer setting`;
           note.style.display = '';
         } else {
           note.style.display = 'none';
@@ -5151,6 +5239,16 @@ Phase                                Dur (d)   Predecessor
     const isProject = rowType === 'project';
     const isParent = NODES.some(x => parentOf(x.id) === idForCheck && idForCheck);
     const notice = document.getElementById('m-rollup-notice');
+
+    // Project-meta block (RTB code, type, sector, installer) — projects only.
+    const projectMetaEl = document.getElementById('m-project-meta');
+    if (projectMetaEl) projectMetaEl.style.display = isProject ? '' : 'none';
+    if (isProject) {
+      document.getElementById('m-rtb-code').value       = n.rtb_code       || '';
+      document.getElementById('m-installer-name').value = n.installer_name || '';
+      document.getElementById('m-project-type').value   = n.project_type   || '';
+      document.getElementById('m-sector').value         = n.sector         || '';
+    }
 
     // Lifecycle-grouped financial sections — show/hide per row type.
     applyFinancialSectionVisibility(rowType, isParent);
@@ -5869,6 +5967,11 @@ Phase                                Dur (d)   Predecessor
       percent_done: (rowType === 'subtask' && !isParent)
                       ? (document.getElementById('m-status').value === 'Done' ? 100 : 0)
                       : '',
+      // Project meta — only persisted on project rows.
+      rtb_code:       rowType === 'project' ? document.getElementById('m-rtb-code').value.trim()       : '',
+      installer_name: rowType === 'project' ? document.getElementById('m-installer-name').value.trim() : '',
+      project_type:   rowType === 'project' ? document.getElementById('m-project-type').value         : '',
+      sector:         rowType === 'project' ? document.getElementById('m-sector').value               : '',
       // Financial fields — new model.
       //   Project: sale_price + estimated_raw_cost are manual; live fields are derived (don't persist).
       //   Task:    everything derived (don't persist).
@@ -5988,7 +6091,7 @@ Phase                                Dur (d)   Predecessor
       if (!isNaN(raw) || isFinite(eff)) {
         const showVal = isFinite(eff) ? eff : raw;
         const capped = (MAX_SLACK_CAP != null && !isNaN(raw) && raw > MAX_SLACK_CAP);
-        html += `<div class="tip-row"><b>Slack:</b> ${esc(showVal)} day${showVal === 1 ? '' : 's'}${capped ? ` <span style="color:#9ca3af;font-size:10px;">(raw ${esc(raw)}, capped to ${esc(MAX_SLACK_CAP)})</span>` : ''}</div>`;
+        html += `<div class="tip-row"><b>Buffer:</b> ${esc(showVal)} day${showVal === 1 ? '' : 's'}${capped ? ` <span style="color:#9ca3af;font-size:10px;">(raw ${esc(raw)}, capped to ${esc(MAX_SLACK_CAP)})</span>` : ''}</div>`;
       }
     }
     {
@@ -7725,7 +7828,7 @@ Phase                                Dur (d)   Predecessor
     lines.push(`Scheduled: ${fmt(rng.schedStart)} → ${fmt(rng.schedEnd)}`);
     lines.push(`Actual:    ${fmt(rng.actualStart)} → ${fmt(rng.actualEnd)}`);
     if (live.slack !== '' && live.slack != null) {
-      lines.push(`Slack: ${live.slack} day${String(live.slack) === '1' ? '' : 's'}${String(live.slack) === '0' ? ' ★ critical path' : ''}`);
+      lines.push(`Buffer: ${live.slack} day${String(live.slack) === '1' ? '' : 's'}${String(live.slack) === '0' ? ' ★ critical path' : ''}`);
     }
     if (live.predecessors) lines.push(`Predecessors: ${live.predecessors}`);
     return { ok: true, targetId: res.id, text: lines.join('\n') };
