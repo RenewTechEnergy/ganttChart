@@ -6087,6 +6087,17 @@ Phase                                Dur (d)   Predecessor
     }
   }
 
+  // Test hook: expose pure helpers for integration tests. Production code
+  // does not depend on this — it's a no-op except in tests where a unit
+  // test directly invokes the helpers via window.__importApply.
+  if (typeof window !== 'undefined') {
+    window.__importApply = {
+      detectImportConflicts,
+      renumberMergedTasks,
+      rewriteImportPreds,
+    };
+  }
+
   const dropOverlay = document.getElementById('dropOverlay');
   ['dragenter','dragover'].forEach(evt => {
     document.body.addEventListener(evt, e => {
