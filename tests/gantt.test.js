@@ -10,7 +10,7 @@ function detectImportConflicts(imported, existing) {
   // Returns a Map<importedProjectId, existingProjectId> for matches.
   const existingByKey = new Map();
   for (const n of existing) {
-    if (n.type !== 'project' && (n.id || '').includes('-')) continue;
+    if (n.type !== 'project') continue;
     existingByKey.set(`${n.id}${n.name}`, n.id);
   }
   const out = new Map();
