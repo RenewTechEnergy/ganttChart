@@ -103,7 +103,8 @@
     .row-name.is-p { font-weight: 700; }
     .row-name.is-t { font-weight: 600; }
     .row-name.is-s { font-weight: 500; color: #4b5563; }
-    .row-meta { font-size: 10px; color: #9ca3af; margin-top: 1px; display: flex; gap: 8px; }
+    .row-meta { font-size: 10px; color: #9ca3af; margin-top: 1px; display: flex; gap: 6px 8px; flex-wrap: wrap; align-items: center; }
+    .row-status-pill { display: inline-block; color: white; padding: 1px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; white-space: nowrap; line-height: 1.5; flex-shrink: 0; }
 
     .row-timeline { flex: 1; position: relative; overflow: hidden; }
     .m-div { position: absolute; top: 0; bottom: 0; width: 1px; background: #f3f4f6; pointer-events: none; }
@@ -4206,7 +4207,7 @@ Phase                                Dur (d)   Predecessor
       const ownerLabel = n.owner ? `👤 ${esc(n.owner)}` : '';
       const statusLive = computeStatus(n);
       const isParent = childrenOf(n).length > 0;
-      const pdLabel = `<span style="background:${STATUS_COLORS[statusLive]};color:white;padding:1px 6px;border-radius:8px;font-weight:600;">${esc(statusLive)}</span>${isParent ? ' <span style="font-size:8px;color:#9ca3af;">⌃</span>' : ''}`;
+      const pdLabel = `<span class="row-status-pill" style="background:${STATUS_COLORS[statusLive]};">${esc(statusLive)}</span>${isParent ? ' <span style="font-size:8px;color:#9ca3af;">⌃</span>' : ''}`;
 
       // Lifecycle chips — proposal margin on projects; rolled variance on every row.
       const costBits = [];
@@ -4256,8 +4257,8 @@ Phase                                Dur (d)   Predecessor
             <div class="row-text">
               <div class="row-name is-${type[0]}" title="${esc(n.name)}">${namePrefix}${esc(n.name || '(unnamed)')}</div>
               <div class="row-meta">
+                ${pdLabel}
                 ${ownerLabel ? `<span>${ownerLabel}</span>` : ''}
-                ${pdLabel ? `<span>${pdLabel}</span>` : ''}
               </div>
               ${costsHtml ? `<div class="row-meta" style="margin-top:2px;">${costsHtml}</div>` : ''}
               ${pasteBadge ? `<div class="row-meta" style="margin-top:2px;">${pasteBadge}</div>` : ''}
