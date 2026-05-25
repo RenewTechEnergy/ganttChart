@@ -2018,6 +2018,24 @@ Click ⓘ in the header for the full list of things I can do.</div>
       if (error) { console.error("[Supa] setUserRole failed", error); throw error; }
     }
 
+    // Counts used by the Remove user modal so the admin sees what they're
+    // about to nuke before confirming. Returns 0 on any error (modal will
+    // still let the deletion proceed; backend is authoritative).
+    async function countProjectsOwnedBy(userId) {
+      const { count, error } = await supabase
+        .from("tasks").select("id", { count: "exact", head: true })
+        .eq("owner_user_id", userId).is("parent_id", null);
+      if (error) { console.warn("[Supa] countProjectsOwnedBy failed", error); return 0; }
+      return count || 0;
+    }
+    async function countSharesFor(userId) {
+      const { count, error } = await supabase
+        .from("project_shares").select("project_id", { count: "exact", head: true })
+        .eq("shared_with", userId);
+      if (error) { console.warn("[Supa] countSharesFor failed", error); return 0; }
+      return count || 0;
+    }
+
     // Has this row id been seen on the server (i.e., synced to tasks)?
     function isInCloud(rowId) { return serverRows.has(rowId); }
 
@@ -2126,6 +2144,7 @@ Click ⓘ in the header for the full list of things I can do.</div>
       fetchProjectOwner, refreshEditableProjects, isInCloud,
       // admin
       listAllProfiles, setUserRole, inviteUser, deleteUser,
+      countProjectsOwnedBy, countSharesFor,
       // ai
       invokeChat,
       // exposed for the share UI
@@ -4302,6 +4321,107 @@ Phase                                Dur (d)   Predecessor
       flashHint('Update failed — check console');
       _usersCache = await window.Supa.listAllProfiles();
       renderUsersList();
+    }
+  }
+
+  // ── Remove user (admin only) ──
+  let _ruTarget = null;   // { user_id, email } of the user being removed
+
+  async function openRemoveUserModal(userId) {
+    const role = window.Supa?.currentRole?.();
+    if (role !== 'admin') { flashHint('Admins only'); return; }
+    const me = window.Supa.currentUserId();
+    if (userId === me) { flashHint("You can't remove yourself"); return; }
+
+    const target = _usersCache.find(p => p.user_id === userId);
+    if (!target) { flashHint('User not found'); return; }
+    _ruTarget = { user_id: userId, email: target.email || '(no email)' };
+
+    document.getElementById('ru-email').textContent = _ruTarget.email;
+    document.getElementById('ru-counts').textContent = 'Loading project + share counts…';
+    document.getElementById('ru-reassign-row').style.display = 'none';
+    document.getElementById('ru-noone').style.display = 'none';
+    document.getElementById('ru-error').style.display = 'none';
+    document.getElementById('ru-confirm').disabled = true;
+    document.getElementById('removeUserModal').style.display = 'flex';
+
+    // Fetch counts via the Supa wrapper (the bare supabase client is
+    // scoped inside the IIFE — only Supa.* is reachable from out here).
+    let ownedCount = 0, sharesCount = 0;
+    try {
+      ownedCount  = await window.Supa.countProjectsOwnedBy(userId);
+      sharesCount = await window.Supa.countSharesFor(userId);
+    } catch (e) {
+      console.warn('[ru] count fetch failed', e);
+    }
+    document.getElementById('ru-counts').textContent =
+      `Owns ${ownedCount} project(s) · Has ${sharesCount} project share(s).`;
+    document.getElementById('ru-owned-count').textContent = String(ownedCount);
+
+    // Populate the reassign dropdown — every user in cache except the target.
+    const candidates = _usersCache
+      .filter(p => p.user_id !== userId)
+      .sort((a, b) => String(a.email || '').localeCompare(String(b.email || '')));
+    const sel = document.getElementById('ru-reassign-pick');
+    sel.innerHTML = '<option value="" disabled selected>— pick a user —</option>'
+      + candidates.map(p => `<option value="${esc(p.user_id)}">${esc(p.email || '(no email)')}</option>`).join('');
+    sel.onchange = () => {
+      document.getElementById('ru-confirm').disabled = !sel.value;
+    };
+
+    if (ownedCount > 0) {
+      if (!candidates.length) {
+        document.getElementById('ru-noone').style.display = '';
+        // Confirm stays disabled — there's no one to reassign to.
+      } else {
+        document.getElementById('ru-reassign-row').style.display = '';
+      }
+    } else {
+      // No owned projects → no reassign needed → enable the button immediately.
+      document.getElementById('ru-confirm').disabled = false;
+    }
+  }
+
+  function closeRemoveUserModal() {
+    document.getElementById('removeUserModal').style.display = 'none';
+    _ruTarget = null;
+  }
+
+  async function confirmRemoveUser() {
+    if (!_ruTarget) return;
+    const btn = document.getElementById('ru-confirm');
+    const errEl = document.getElementById('ru-error');
+    errEl.style.display = 'none';
+    btn.disabled = true;
+
+    // If owned-count > 0, require a selection. Otherwise pass through any
+    // admin id (the server enforces userId !== reassignTo too).
+    const ownedCount = parseInt(document.getElementById('ru-owned-count').textContent || '0', 10);
+    let reassignTo = document.getElementById('ru-reassign-pick').value;
+    if (!reassignTo) {
+      if (ownedCount > 0) {
+        errEl.textContent = 'Pick a user to reassign their projects to.';
+        errEl.style.display = '';
+        btn.disabled = false;
+        return;
+      }
+      // No projects to reassign — pass the current admin's own id; server
+      // will accept since the reassign is a no-op (zero rows updated).
+      reassignTo = window.Supa.currentUserId();
+    }
+
+    try {
+      const out = await window.Supa.deleteUser(_ruTarget.user_id, reassignTo);
+      const email = _ruTarget.email;
+      const reassigned = out?.reassigned_projects ?? 0;
+      closeRemoveUserModal();
+      _usersCache = await window.Supa.listAllProfiles();
+      renderUsersList();
+      flashHint(`Removed ${email}${reassigned ? ` · reassigned ${reassigned} project(s)` : ''}`);
+    } catch (e) {
+      errEl.textContent = e?.message || 'Remove failed.';
+      errEl.style.display = '';
+      btn.disabled = false;
     }
   }
 
