@@ -4248,6 +4248,7 @@ Phase                                Dur (d)   Predecessor
         <thead><tr style="background:#f9fafb; text-align:left;">
           <th style="padding:8px 10px;">Email</th>
           <th style="padding:8px 10px; width:140px;">Role</th>
+          <th style="padding:8px 10px; width:40px;"></th>
         </tr></thead>
         <tbody>
           ${rows.map(p => {
@@ -4264,6 +4265,9 @@ Phase                                Dur (d)   Predecessor
                     <option value="user"   ${p.role === 'user'   ? 'selected' : ''}>user</option>
                     <option value="viewer" ${p.role === 'viewer' ? 'selected' : ''}>viewer</option>
                   </select>
+                </td>
+                <td style="padding:6px 10px; text-align:right;">
+                  ${isMe ? '' : `<button onclick="openRemoveUserModal('${esc(p.user_id)}')" title="Remove user" style="background:transparent; border:none; cursor:pointer; font-size:14px; color:#b91c1c; padding:2px 6px;">🗑</button>`}
                 </td>
               </tr>`;
           }).join('')}
