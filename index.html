@@ -700,6 +700,33 @@ Click ⓘ in the header for the full list of things I can do.</div>
     </div>
   </div>
 
+  <!-- Remove-user modal (admin only) — single-screen confirm w/ reassign picker -->
+  <div class="modal-overlay" id="removeUserModal" style="display:none" onclick="if(event.target===this)closeRemoveUserModal()">
+    <div class="modal" style="max-width:520px;">
+      <h3>🗑 Remove user</h3>
+      <div style="padding:10px 12px; background:#fef2f2; border:1px solid #fecaca; border-radius:8px; margin-bottom:10px; font-size:11px; color:#7f1d1d; line-height:1.5;">
+        ⚠ <b>This is irreversible.</b> <span id="ru-email" style="font-weight:600;"></span> will lose access immediately and all their owned projects must be reassigned to another user. To restore access, you'll need to re-invite them from scratch — their account will be recreated, but project ownership won't come back automatically.
+      </div>
+      <div id="ru-counts" style="font-size:12px; color:#374151; margin-bottom:10px;">Loading…</div>
+      <div id="ru-reassign-row" style="display:none; margin-bottom:10px;">
+        <label style="font-size:12px; color:#374151;">
+          Reassign their <span id="ru-owned-count">0</span> project(s) to:
+          <select id="ru-reassign-pick" style="margin-top:4px; font-size:12px; width:100%; padding:6px 8px;">
+            <option value="" disabled selected>— pick a user —</option>
+          </select>
+        </label>
+      </div>
+      <div id="ru-noone" style="display:none; padding:8px 10px; background:#fef3c7; border:1px solid #fde68a; border-radius:6px; font-size:11px; color:#92400e; margin-bottom:10px;">
+        ⚠ No one else to reassign these projects to. Invite another user first.
+      </div>
+      <div id="ru-error" style="display:none; padding:8px 10px; background:#fef2f2; border:1px solid #fecaca; border-radius:6px; font-size:11px; color:#7f1d1d; margin-bottom:10px;"></div>
+      <div class="modal-actions">
+        <button class="btn btn-cancel" onclick="closeRemoveUserModal()">Cancel</button>
+        <button class="btn btn-del" id="ru-confirm" onclick="confirmRemoveUser()" disabled>Remove user</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Edit modal — all 15 fields -->
   <div class="modal-overlay" id="modal" style="display:none" onclick="if(event.target===this)closeModal()">
     <div class="modal">
