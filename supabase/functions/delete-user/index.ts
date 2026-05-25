@@ -209,9 +209,6 @@ export default {
       const v = validateBody(body, caller.userId);
       if (!v.ok) return json({ error: v.error }, v.status);
 
-      if (!(await profileExists(admin, v.userId))) {
-        return json({ error: "User does not exist." }, 404);
-      }
       if (!(await profileExists(admin, v.reassignTo))) {
         return json({ error: "reassign_to user does not exist." }, 400);
       }
