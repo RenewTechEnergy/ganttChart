@@ -816,8 +816,16 @@ Click ⓘ in the header for the full list of things I can do.</div>
         <div class="modal-section-label">Progress</div>
         <div class="modal-grid">
           <label>Slack (days)<input id="m-slack" type="number" step="1" placeholder="e.g. 3"></label>
-          <label>% Done<input id="m-percent-done" type="number" min="0" max="100" step="1" placeholder="0-100"></label>
+          <label>Status
+            <select id="m-status">
+              <option value="Not Started">Not Started</option>
+              <option value="In Progress">In Progress</option>
+              <option value="Delayed">Delayed</option>
+              <option value="Done">Done</option>
+            </select>
+          </label>
         </div>
+        <div id="m-status-note" style="font-size:11px; color:#6b7280; margin-top:6px; display:none;"></div>
       </div>
 
       <!-- ═════ Financial sections (lifecycle-grouped) ═════════════════════
@@ -2723,23 +2731,20 @@ Phase                                Dur (d)   Predecessor
     today:                  { color: '#FFE699', label: 'Today',                     desc: 'Week containing the status date.' },
   };
 
-  // Status colors used for bar fills in the HTML chart (derives from % Done + slack + dates)
+  // Status colors used for bar fills in the HTML chart.
+  // Driven by the new per-subtask `status` field; parents roll up by priority rule.
   const STATUS_COLORS = {
-    'Not Started': LEGEND.scheduled_non_critical.color,
-    'In Progress': LEGEND.scheduled_and_actual.color,
-    'Critical':    LEGEND.scheduled_critical.color,
-    'Late Start':  LEGEND.late_start.color,
-    'At Risk':     LEGEND.delay_overrun.color,
-    'Completed':   LEGEND.actual_progress.color,
+    'Not Started': '#9ca3af',
+    'In Progress': '#3b82f6',
+    'Delayed':     '#dc2626',
+    'Done':        '#16a34a',
   };
-  // Human-readable explanation of how each status is derived
+  // Human-readable explanation of each status
   const STATUS_MEANINGS = {
-    'Not Started': '% Done = 0 and scheduled start is still in the future. Nothing to worry about yet.',
-    'In Progress': 'Work has started (actual_start set, % Done > 0, < 100) and the row has slack — some buffer before it would delay the project.',
-    'Critical':    'Work has started and Slack = 0. Any delay will slip the project finish — focus management attention here.',
-    'Late Start':  'Scheduled start has passed but no actual work has begun (no actual_start, % Done = 0). The row is already behind plan.',
-    'At Risk':     'Work has started but the scheduled end has passed and % Done < 100 — the row is in delay/overrun.',
-    'Completed':   '% Done = 100. Work is finished.',
+    'Not Started': 'Work has not begun yet.',
+    'In Progress': 'Work is underway (actual_start set).',
+    'Delayed':     'A subtask was explicitly marked Delayed (its scheduled end was pushed out; downstream tasks shifted).',
+    'Done':        'Work is finished.',
   };
 
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -3271,6 +3276,7 @@ Phase                                Dur (d)   Predecessor
           actual_start: fmtDate(sStart), actual_end: fmtDate(sEnd),
           slack: String(result.slack[t.tid]),
           percent_done: 0,
+          status: 'Not Started',
           // New financial model:
           estimated_raw_cost: '', sale_price: '',
           quoted_cost: '', actual_spend_to_date: '', committed_to_spend: '',
@@ -3569,6 +3575,22 @@ Phase                                Dur (d)   Predecessor
         n.actual_spend_to_date = n.cost_to_date;
       }
       if (n.committed_to_spend == null) n.committed_to_spend = '';
+
+      // Status enum migration: pct_done → status.
+      //   100  → 'Done'
+      //   >0   → 'In Progress'
+      //   0/empty → 'Not Started'
+      // Only applied to subtasks (status lives on leaves only; parents roll up).
+      if (isSubtask && (n.status == null || n.status === '')) {
+        const pd = Number(n.percent_done);
+        if (!isNaN(pd)) {
+          if      (pd >= 100) n.status = 'Done';
+          else if (pd >    0) n.status = 'In Progress';
+          else                n.status = 'Not Started';
+        } else {
+          n.status = 'Not Started';
+        }
+      }
     }
     return nodes;
   }
@@ -3721,22 +3743,37 @@ Phase                                Dur (d)   Predecessor
   //   Critical    — work in progress on the critical path (slack = 0).
   //   In Progress — work in progress with slack > 0.
   //   Not Started — % done = 0 and scheduled start is still in the future.
+  /* Status derives from the explicit per-subtask `status` field.
+       • Subtask (leaf): returns its stored status (defaults to 'Not Started').
+       • Task / Project: priority-rule rollup of descendant subtasks:
+             any Delayed → 'Delayed'
+         else any In Progress → 'In Progress'
+         else all Done → 'Done'
+         else 'Not Started'.
+       A project with zero subtasks rolls up to 'Not Started'. */
   function computeStatus(node) {
-    const today = new Date(); today.setHours(0,0,0,0);
-    const pd = ePercentDone(node);
-    if (pd >= 100) return 'Completed';
-    // Use rolled-up dates so a parent's status reflects its earliest/latest child.
-    const rng = eDateRange(node);
-    const schedStart  = rng.schedStart  || node.sched_start;
-    const schedEnd    = rng.schedEnd    || node.sched_end;
-    const actualStart = rng.actualStart || node.actual_start;
-    if (isNaN(pd) || pd <= 0) {
-      if (schedStart && new Date(schedStart) < today) return 'Late Start';
-      return 'Not Started';
+    // Leaves return their own field.
+    const kids = childrenOf(node);
+    if (kids.length === 0) {
+      const s = node.status || 'Not Started';
+      return ['Not Started','In Progress','Delayed','Done'].includes(s) ? s : 'Not Started';
     }
-    // Work is in progress (pd > 0). If we're past the scheduled end, the row is delayed.
-    if (schedEnd && actualStart && new Date(schedEnd) < today) return 'At Risk';
-    return isCriticalPath(node) ? 'Critical' : 'In Progress';
+    // Collect subtask statuses across all descendants.
+    const subStatuses = [];
+    (function walk(n) {
+      for (const k of childrenOf(n)) {
+        if (childrenOf(k).length === 0) {
+          subStatuses.push(k.status || 'Not Started');
+        } else {
+          walk(k);
+        }
+      }
+    })(node);
+    if (subStatuses.length === 0)                       return 'Not Started';
+    if (subStatuses.includes('Delayed'))                return 'Delayed';
+    if (subStatuses.includes('In Progress'))            return 'In Progress';
+    if (subStatuses.every(s => s === 'Done'))           return 'Done';
+    return 'Not Started';
   }
   // Variance = quoted_cost − (actual_spend_to_date + committed_to_spend).
   // Uses rolled-up values for parents. Returns '' when all three sources empty.
@@ -3754,15 +3791,14 @@ Phase                                Dur (d)   Predecessor
     return (sp - rc).toFixed(2);
   }
   // Final Margin (end-of-project, locked) = sale_price − (actual + committed).
-  // Returns '' until every subtask of this project has pct_done === 100.
-  // PR2 switches this to status === 'Done'.
+  // Returns '' until every subtask of this project has status === 'Done'.
   function computeFinalMargin(node) {
     if (typeFromId(node.id) !== 'project') return '';
     const subs = NODES.filter(n =>
       typeFromId(n.id) === 'subtask' && n.id.split('-')[0] === node.id
     );
     if (subs.length === 0) return '';
-    const allDone = subs.every(s => Number(s.percent_done) >= 100);
+    const allDone = subs.every(s => (s.status || 'Not Started') === 'Done');
     if (!allDone) return '';
     const sp = eSale(node), a = eActual(node), c = eCommitted(node);
     if (!sp && !a && !c) return '';
@@ -5079,55 +5115,36 @@ Phase                                Dur (d)   Predecessor
         }
       }
     }
-    const pdInput = document.getElementById('m-percent-done');
-    // % Done lock states:
-    //   Parent      → derived from children (read-only, grey).
-    //   Leaf, gated → predecessors not yet 100% (read-only at 0, amber).
-    //   Leaf, free  → editable.
+    // ── Status dropdown ──
+    //   Subtask (leaf)  → editable; defaults to 'Not Started'.
+    //   Parent (task/project) → read-only; shows the priority-rule rollup of subtasks.
+    //   Predecessor gate → locked at 'Not Started' until every predecessor is Done.
     {
-      const idForPdCheck = n.id || '';
-      const isParentForPd = NODES.some(x => parentOf(x.id) === idForPdCheck && idForPdCheck);
+      const statusInput = document.getElementById('m-status');
+      const statusNote  = document.getElementById('m-status-note');
+      const idForCheck2 = n.id || '';
+      const isParentForStatus = NODES.some(x => parentOf(x.id) === idForCheck2 && idForCheck2);
+      statusNote.style.display = 'none';
+      statusNote.style.color = '#6b7280';
 
-      // Reuse / create the gate-explanation note element.
-      let gateNote = document.getElementById('m-pd-gate-note');
-      if (!gateNote) {
-        gateNote = document.createElement('div');
-        gateNote.id = 'm-pd-gate-note';
-        gateNote.style.cssText = 'font-size:10px; margin-top:2px;';
-        pdInput.parentNode.appendChild(gateNote);
-      }
-      gateNote.style.display = 'none';
-
-      if (isParentForPd) {
-        const pdEff = ePercentDone({ ...n, id: idForPdCheck });
-        pdInput.value = pdEff % 1 === 0 ? pdEff.toFixed(0) : pdEff.toFixed(1);
-        pdInput.readOnly = true;
-        pdInput.style.background = '#f9fafb';
-        pdInput.style.color = '#6b7280';
-      } else if (!predecessorsComplete({ ...n, id: idForPdCheck })) {
-        // Predecessor gate: lock at 0 until all predecessors finish.
-        pdInput.value = 0;
-        pdInput.readOnly = true;
-        pdInput.style.background = '#fef3c7';
-        pdInput.style.color = '#92400e';
-        gateNote.textContent = '🔒 Locked at 0 — predecessors must reach 100% before this can start.';
-        gateNote.style.color = '#92400e';
-        gateNote.style.display = '';
+      if (isParentForStatus) {
+        const rolled = computeStatus({ ...n, id: idForCheck2 });
+        statusInput.value = rolled;
+        statusInput.disabled = true;
+        statusNote.textContent = `Rolled up from subtasks: ${rolled}`;
+        statusNote.style.display = '';
+      } else if (!predecessorsComplete({ ...n, id: idForCheck2 })) {
+        statusInput.value = 'Not Started';
+        statusInput.disabled = true;
+        statusNote.textContent = '🔒 Locked — predecessors must reach Done before this can start.';
+        statusNote.style.color = '#92400e';
+        statusNote.style.display = '';
       } else {
-        pdInput.value = clampPercent(n.percent_done ?? '');
-        pdInput.readOnly = false;
-        pdInput.style.background = 'white';
-        pdInput.style.color = '#111827';
+        statusInput.value = n.status || 'Not Started';
+        statusInput.disabled = false;
       }
+      statusInput.onchange = () => handleStatusChange(idForCheck2);
     }
-    // Live-clamp on input so the user sees the value snap to range immediately
-    pdInput.oninput = () => {
-      const v = parseFloat(pdInput.value);
-      if (!isNaN(v)) {
-        if (v > 100) pdInput.value = 100;
-        if (v < 0)   pdInput.value = 0;
-      }
-    };
 
     const idForCheck = n.id || '';
     const rowType = typeFromId(idForCheck) || 'project';
@@ -5564,6 +5581,70 @@ Phase                                Dur (d)   Predecessor
 
   // recalcSaleFromMargin removed — Sale Price is now entered manually for projects.
 
+  /* Side effects when the user changes the Status dropdown:
+       Not Started → clear actual_start / actual_end (with confirmation if populated)
+       In Progress → set actual_start = today (if empty)
+       Done        → set actual_end = today (if empty); also actual_start if empty
+       Delayed     → prompt for a new scheduled_end date and reschedule downstream
+     Only invoked on the live subtask leaf node. The modal-open path keeps
+     parent rows disabled so this only runs on user input from leaves. */
+  function handleStatusChange(rowId) {
+    const sel = document.getElementById('m-status');
+    const newStatus = sel.value;
+    const today = (() => {
+      const d = new Date(); d.setHours(0,0,0,0);
+      return fmtDate(d);
+    })();
+    const aStart = document.getElementById('m-actual-start');
+    const aEnd   = document.getElementById('m-actual-end');
+    const sEndEl = document.getElementById('m-sched-end');
+
+    if (newStatus === 'Not Started') {
+      if ((aStart.value || aEnd.value) &&
+          !confirm('Reset actual dates? This subtask has an actual_start / actual_end already.')) {
+        // Revert to previous value: read from NODES.
+        const n = NODES.find(x => x.id === rowId);
+        sel.value = (n && n.status) || 'Not Started';
+        return;
+      }
+      aStart.value = '';
+      aEnd.value   = '';
+    } else if (newStatus === 'In Progress') {
+      if (!aStart.value) aStart.value = today;
+    } else if (newStatus === 'Done') {
+      if (!aStart.value) aStart.value = today;
+      if (!aEnd.value)   aEnd.value   = today;
+    } else if (newStatus === 'Delayed') {
+      // Default new end: today + (current sched span). Working-days-naive for the prompt.
+      const sStart = document.getElementById('m-sched-start').value;
+      const sEnd   = sEndEl.value;
+      let defaultISO = today;
+      if (sStart && sEnd) {
+        const span = Math.max(1, Math.round((new Date(sEnd) - new Date(sStart)) / 86400000));
+        const d = new Date(); d.setHours(0,0,0,0);
+        d.setDate(d.getDate() + span);
+        defaultISO = fmtDate(d);
+      }
+      const input = prompt('Delayed — new scheduled end date (YYYY-MM-DD):', defaultISO);
+      if (input == null) {
+        const n = NODES.find(x => x.id === rowId);
+        sel.value = (n && n.status) || 'Not Started';
+        return;
+      }
+      // Validation: must be a valid date and ≥ scheduled_start.
+      const newEnd = new Date(input);
+      if (isNaN(+newEnd) || (sStart && newEnd < new Date(sStart))) {
+        alert(`Invalid date — must be on or after the scheduled start (${sStart || '—'}).`);
+        const n = NODES.find(x => x.id === rowId);
+        sel.value = (n && n.status) || 'Not Started';
+        return;
+      }
+      sEndEl.value = fmtDate(newEnd);
+      // Downstream reschedule runs after saveModal commits the change.
+      // The existing runCPM(projectId, 'forward') is invoked on save below.
+    }
+  }
+
   /* Show/hide the three financial sections based on row type.
        project → all three. task → live only (read-only). subtask → live only
        (editable for leaves; read-only when the subtask itself has children). */
@@ -5726,6 +5807,7 @@ Phase                                Dur (d)   Predecessor
       sched_start: today, sched_end: monthLater,
       actual_start: today, actual_end: monthLater,
       slack: '', percent_done: 0,
+      status: 'Not Started',
       // Legacy (cleared on save by saveModal anyway):
       est_cost: '', cost_to_date: '',
       // New financial model:
@@ -5779,10 +5861,14 @@ Phase                                Dur (d)   Predecessor
       actual_start: actualStart,
       actual_end:   actualEnd,
       slack:        document.getElementById('m-slack').value,
-      // % Done is only editable on leaves; parents derive from children. The
-      // input is read-only for parents, but skip persisting it regardless so
-      // the row is unambiguous in storage.
-      percent_done: isParent ? '' : clampPercent(document.getElementById('m-percent-done').value),
+      // Status is the user-facing field — pct_done is derived for back-compat (Done=100, others=0).
+      // Subtask (leaf): writes status from the dropdown. Parent rows persist neither.
+      status:       (rowType === 'subtask' && !isParent)
+                      ? (document.getElementById('m-status').value || 'Not Started')
+                      : '',
+      percent_done: (rowType === 'subtask' && !isParent)
+                      ? (document.getElementById('m-status').value === 'Done' ? 100 : 0)
+                      : '',
       // Financial fields — new model.
       //   Project: sale_price + estimated_raw_cost are manual; live fields are derived (don't persist).
       //   Task:    everything derived (don't persist).
@@ -5799,9 +5885,10 @@ Phase                                Dur (d)   Predecessor
       collapsed:    modalIdx >= 0 ? NODES[modalIdx].collapsed : false,
     };
 
-    // Predecessor gate — if this is a subtask whose predecessors aren't all 100%,
-    // force its stored % done to 0 so the row can't "start" until they finish.
+    // Predecessor gate — if this is a subtask whose predecessors aren't all Done,
+    // force its stored status to 'Not Started' so the row can't "start" until they finish.
     if (!isParent && !predecessorsComplete(node)) {
+      node.status = 'Not Started';
       node.percent_done = 0;
     }
 
@@ -5906,15 +5993,31 @@ Phase                                Dur (d)   Predecessor
     }
     {
       const isParent = childrenOf(n).length > 0;
-      const pdEff = ePercentDone(n);
-      const pdStr = pdEff % 1 === 0 ? pdEff.toFixed(0) : pdEff.toFixed(1);
-      html += `<div class="tip-row"><b>% Done:</b> ${pdStr}%${isParent ? ' <span style="color:#9ca3af;font-size:10px;">(rolled up)</span>' : ''} · <b style="color:${STATUS_COLORS[status]}">${esc(status)}</b></div>`;
+      html += `<div class="tip-row"><b>Status:</b> <b style="color:${STATUS_COLORS[status]}">${esc(status)}</b>${isParent ? ' <span style="color:#9ca3af;font-size:10px;">(rolled up)</span>' : ''}</div>`;
     }
-    if (n.est_cost)      html += `<div class="tip-row"><b>Est. Cost:</b> $${esc(n.est_cost)}</div>`;
-    if (n.cost_to_date)  html += `<div class="tip-row"><b>Cost-to-Date:</b> $${esc(n.cost_to_date)}</div>`;
-    if (variance !== '') html += `<div class="tip-row"><b>Variance:</b> $${esc(variance)}</div>`;
-    if (n.sale_price)    html += `<div class="tip-row"><b>Sale Price:</b> $${esc(n.sale_price)}</div>`;
-    if (margin !== '')   html += `<div class="tip-row"><b>Margin:</b> $${esc(margin)}</div>`;
+    // Financials — show in lifecycle order. Money values are rolled-up for parents.
+    {
+      const rowType = typeFromId(n.id);
+      const isParent = childrenOf(n).length > 0;
+      const fmt$ = v => '$' + Number(v).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+      if (rowType === 'project') {
+        if (n.sale_price)         html += `<div class="tip-row"><b>Sale Price:</b> ${fmt$(n.sale_price)}</div>`;
+        if (n.estimated_raw_cost) html += `<div class="tip-row"><b>Est. Raw Cost:</b> ${fmt$(n.estimated_raw_cost)}</div>`;
+        const pm = computeProjectMargin(n);
+        if (pm !== '')            html += `<div class="tip-row"><b>Project Margin:</b> ${fmt$(pm)}</div>`;
+      }
+      const q = isParent ? eQuoted(n) : (parseFloat(n.quoted_cost) || 0);
+      const a = isParent ? eActual(n) : (parseFloat(n.actual_spend_to_date) || 0);
+      const c = isParent ? eCommitted(n) : (parseFloat(n.committed_to_spend) || 0);
+      if (q) html += `<div class="tip-row"><b>Quoted:</b> ${fmt$(q)}</div>`;
+      if (a) html += `<div class="tip-row"><b>Actual:</b> ${fmt$(a)}</div>`;
+      if (c) html += `<div class="tip-row"><b>Committed:</b> ${fmt$(c)}</div>`;
+      if (variance !== '') html += `<div class="tip-row"><b>Variance:</b> ${fmt$(variance)}</div>`;
+      if (rowType === 'project') {
+        const fm = computeFinalMargin(n);
+        if (fm !== '') html += `<div class="tip-row"><b>Final Margin:</b> ${fmt$(fm)}</div>`;
+      }
+    }
                           html += `<div style="margin-top:5px;color:#9ca3af;font-size:10px;">Drag bar · Drag edges to resize · Click label to edit</div>`;
     tipEl.innerHTML = html;
     tipEl.style.display = 'block';
