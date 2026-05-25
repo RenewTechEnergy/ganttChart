@@ -6009,50 +6009,9 @@ Phase                                Dur (d)   Predecessor
     if (result.error) { alert(result.error); return; }
     if (!result.nodes.length) { alert('No usable rows in this CSV.'); return; }
 
-    // Append as new projects; existing rows are untouched. Colliding P-IDs are
-    // renumbered to the next free number so nothing in the current board is
-    // overwritten or merged into.
-    const projectCount = result.nodes.filter(n => n.type === 'project').length;
-    if (NODES.length && !confirm(
-      `Import ${result.nodes.length} rows (${projectCount} project${projectCount === 1 ? '' : 's'}) from "${file.name}"?\n\n` +
-      `Existing data will be kept. New projects get fresh IDs to avoid clashes.\n\n` +
-      `(Cancel to abort. To replace all data instead, use ↺ Reset first.)`
-    )) return;
-
-    pushHistory();
-    remapCollidingProjectIds(result.nodes);
-
-    // Dedupe against existing NODES — if the CSV repeats an id that already
-    // exists after remap (e.g. a row exported and re-dropped without renumbering),
-    // skip it rather than create a duplicate that would crash the Supabase upsert.
-    const existingIds = new Set(NODES.map(n => n.id));
-    const seenImport = new Set();
-    let skipped = 0;
-    for (const n of result.nodes) {
-      if (existingIds.has(n.id) || seenImport.has(n.id)) { skipped++; continue; }
-      seenImport.add(n.id);
-      NODES.push(n);
-    }
-    if (skipped) console.warn(`[import] skipped ${skipped} row(s) whose ids already exist`);
-
-    // Select newly imported projects in the filter so they're visible. Also
-    // mark them optimistically as editable — the current user just created
-    // them, so the audit trigger will set owner_user_id = auth.uid() on insert.
-    // We refresh from the server afterwards to converge with the real state.
-    result.nodes.forEach(n => {
-      if (n.type === 'project') {
-        selectedProjects.add(n.id);
-        if (window.__editableProjectIds) window.__editableProjectIds.add(n.id);
-      }
-    });
-
-    saveLocal(); populateFilters(); render();
-    flashHint(`📥 Imported ${result.nodes.length} row${result.nodes.length === 1 ? '' : 's'} from ${file.name}`);
-    // After Supabase upserts settle, pull the authoritative editable set so the
-    // Mine filter shows every newly-created project (not just the last one).
-    if (window.Supa?.refreshEditableProjects) {
-      setTimeout(() => window.Supa.refreshEditableProjects(), 1500);
-    }
+    // Open the picker / conflict-resolution modal; apply happens in
+    // confirmImport() once the user clicks Import.
+    openImportModal(file.name, result.nodes);
   });
 
   /* ══════════════════════════════════════════════════════════════
