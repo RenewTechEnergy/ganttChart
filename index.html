@@ -727,6 +727,34 @@ Click ⓘ in the header for the full list of things I can do.</div>
     </div>
   </div>
 
+  <!-- CSV import modal — picker + per-project conflict resolver -->
+  <div class="modal-overlay" id="importModal" style="display:none" onclick="if(event.target===this)closeImportModal()">
+    <div class="modal" style="max-width:720px;">
+      <h3 id="im-title">📥 Import from CSV</h3>
+      <div id="im-summary" style="font-size:11px; color:#6b7280; margin-bottom:10px;"></div>
+      <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:8px; font-size:11px;">
+        <button class="btn btn-cancel" style="padding:3px 8px;" onclick="imSelectAll(true)">Select all</button>
+        <button class="btn btn-cancel" style="padding:3px 8px;" onclick="imSelectAll(false)">Deselect all</button>
+        <span style="flex:1;"></span>
+        <label>Default conflicts to:
+          <select id="im-default-resolution" onchange="imApplyDefaultResolution(this.value)">
+            <option value="">— choose —</option>
+            <option value="new">Import as new</option>
+            <option value="keep">Keep mine</option>
+            <option value="overwrite">Overwrite mine</option>
+            <option value="merge">Merge</option>
+          </select>
+        </label>
+      </div>
+      <div id="im-rows" style="max-height:55vh; overflow:auto; border:1px solid #e5e7eb; border-radius:8px;"></div>
+      <div id="im-footer" style="font-size:12px; color:#374151; margin-top:10px;"></div>
+      <div class="modal-actions">
+        <button class="btn btn-cancel" onclick="closeImportModal()">Cancel</button>
+        <button class="btn btn-ok" id="im-confirm" onclick="confirmImport()" disabled>Import</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Edit modal — all 15 fields -->
   <div class="modal-overlay" id="modal" style="display:none" onclick="if(event.target===this)closeModal()">
     <div class="modal">
