@@ -11,12 +11,12 @@ function detectImportConflicts(imported, existing) {
   const existingByKey = new Map();
   for (const n of existing) {
     if (n.type !== 'project') continue;
-    existingByKey.set(`${n.id}${n.name}`, n.id);
+    existingByKey.set(`${n.id}\x00${n.name}`, n.id);
   }
   const out = new Map();
   for (const n of imported) {
     if (n.type !== 'project') continue;
-    const key = `${n.id}${n.name}`;
+    const key = `${n.id}\x00${n.name}`;
     if (existingByKey.has(key)) out.set(n.id, existingByKey.get(key));
   }
   return out;
@@ -73,7 +73,8 @@ describe('detectImportConflicts (CSV import conflict detection)', () => {
 // at once. Re-implemented inline (matches the inline-helper test pattern).
 function renumberMergedTasks(existingProjectId, existingNodes, importedNodes) {
   // Find max existing T-num under existingProjectId.
-  const re = new RegExp('^' + existingProjectId + '-T(\\d+)$');
+  const escId = existingProjectId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp('^' + escId + '-T(\\d+)$');
   let maxT = 0;
   for (const n of existingNodes) {
     const m = (n.id || '').match(re);

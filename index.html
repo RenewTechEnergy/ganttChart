@@ -5790,12 +5790,12 @@ Phase                                Dur (d)   Predecessor
     const existingByKey = new Map();
     for (const n of existing) {
       if (n.type !== 'project') continue;
-      existingByKey.set(`${n.id}${n.name}`, n.id);
+      existingByKey.set(`${n.id}\x00${n.name}`, n.id);
     }
     const out = new Map();
     for (const n of imported) {
       if (n.type !== 'project') continue;
-      const key = `${n.id}${n.name}`;
+      const key = `${n.id}\x00${n.name}`;
       if (existingByKey.has(key)) out.set(n.id, existingByKey.get(key));
     }
     return out;
@@ -5804,7 +5804,8 @@ Phase                                Dur (d)   Predecessor
   // Renumber imported tasks/subtasks of one project to slot under an
   // existing project at the next free T-number. Returns { nodes, remap }.
   function renumberMergedTasks(existingProjectId, existingNodes, importedNodesForProject) {
-    const re = new RegExp('^' + existingProjectId + '-T(\\d+)$');
+    const escId = existingProjectId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp('^' + escId + '-T(\\d+)$');
     let maxT = 0;
     for (const n of existingNodes) {
       const m = (n.id || '').match(re);
@@ -5943,8 +5944,9 @@ Phase                                Dur (d)   Predecessor
   function imSetResolution(id, resolution) {
     const r = imRowsBy(id); if (!r) return;
     r.resolution = resolution;
+    // Auto-uncheck on 'keep'; never auto-recheck — leave the user's checkbox
+    // state alone so a deliberate manual exclusion is preserved.
     if (resolution === 'keep') r.included = false;
-    else if (!r.included)      r.included = true;
     renderImportRows();
   }
   function imSelectAll(checked) {
@@ -5961,7 +5963,6 @@ Phase                                Dur (d)   Predecessor
       if (!r.conflict) continue;
       r.resolution = value;
       if (value === 'keep') r.included = false;
-      else if (!r.included) r.included = true;
     }
     renderImportRows();
   }
