@@ -417,3 +417,21 @@ entrypoint = "./functions/chat/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/chat/*.html" ]
+
+# check-email is called BEFORE the user has signed in, so we can't require
+# a user JWT. The function does its own service-role lookups and returns
+# whether the email is provisioned in profiles.
+[functions.check-email]
+enabled = true
+verify_jwt = false
+import_map = "./functions/check-email/deno.json"
+entrypoint = "./functions/check-email/index.ts"
+
+# invite-user is called by an already-signed-in admin. The function
+# re-verifies the caller's role server-side using the forwarded JWT, so we
+# don't need the platform's JWT check on top.
+[functions.invite-user]
+enabled = true
+verify_jwt = false
+import_map = "./functions/invite-user/deno.json"
+entrypoint = "./functions/invite-user/index.ts"

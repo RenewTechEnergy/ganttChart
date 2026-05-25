@@ -191,10 +191,46 @@
     body.signed-out #sourceLabel,
     body.signed-out #filterPopup,
     body.signed-out #notesPanel,
-    body.signed-out .footer-bar { display: none !important; }
+    body.signed-out .footer-bar,
+    body.signed-out #auth-bar,
+    body.signed-out #logoHeader,
+    body.signed-out #footerLogo { display: none !important; }
     body.signed-out .signed-out-hint { display: block; }
-    .signed-out-hint { display: none; max-width: 480px; margin: 80px auto; padding: 24px 28px; text-align: center; color: #6b7280; background: white; border: 1px solid #e5e7eb; border-radius: 12px; font-size: 14px; line-height: 1.6; }
-    .signed-out-hint h2 { font-size: 16px; color: #111827; margin-bottom: 8px; }
+    body.signed-out { padding-top: 0; }
+    .signed-out-hint {
+      display: none;
+      position: fixed; inset: 0; height: fit-content; width: min(440px, calc(100% - 32px));
+      margin: auto;
+      padding: 28px 32px;
+      text-align: center;
+      color: #374151;
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      font-size: 14px;
+      line-height: 1.6;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+    }
+    .signed-out-hint h2 { font-size: 18px; color: #111827; margin-bottom: 8px; }
+    .card-auth-row { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
+    .card-auth-row input {
+      padding: 10px 12px; font-size: 14px; border: 1px solid #d1d5db;
+      border-radius: 6px; width: 100%; box-sizing: border-box;
+    }
+    .card-auth-row button {
+      padding: 10px 16px; font-size: 14px; font-weight: 600; border: none;
+      border-radius: 6px; cursor: pointer; background: #2563eb; color: white;
+    }
+    .card-auth-row button:hover { background: #1d4ed8; }
+    .card-auth-row button.secondary { background: #6b7280; }
+    .card-auth-awaiting-email { font-size: 13px; color: #6b7280; }
+    .card-auth-message {
+      margin-top: 12px; padding: 10px 12px; border-radius: 6px;
+      background: #fef3c7; color: #92400e; font-size: 13px;
+      line-height: 1.5; text-align: left;
+    }
+    .card-auth-message.error { background: #fee2e2; color: #991b1b; }
+    .card-auth-message.info  { background: #dbeafe; color: #1e40af; }
     body.readonly .btn-add-p,
     body.readonly .btn-add-t,
     body.readonly .btn-add-s,
@@ -365,10 +401,10 @@
       <button onclick="Supa.signIn(document.getElementById('auth-email').value)">Send code</button>
     </span>
 
-    <!-- State B: Code sent, awaiting 6-digit verification -->
+    <!-- State B: Code sent, awaiting 8-digit verification -->
     <span id="auth-awaiting" style="display:none;">
       <span id="auth-awaiting-email" style="opacity:0.7;"></span>
-      <input id="auth-code" type="text" inputmode="numeric" maxlength="10" placeholder="code"
+      <input id="auth-code" type="text" inputmode="numeric" maxlength="8" placeholder="8-digit code"
              style="width:140px; letter-spacing:3px; text-align:center; font-family:monospace;" />
       <button onclick="Supa.verifyCode(document.getElementById('auth-code').value)">Verify</button>
       <button onclick="Supa.cancelCode()" style="background:#6b7280;">Cancel</button>
@@ -381,10 +417,27 @@
     </span>
   </div>
 
-  <!-- Shown only when body.signed-out is set (i.e., no session). -->
-  <div class="signed-out-hint">
-    <h2>🔒 Sign in to view the board</h2>
-    <p>Enter your email above and we'll send you a 6-digit code. Once you're signed in your projects will load here.</p>
+  <!-- Shown only when body.signed-out is set (i.e., no session).
+       The auth bar at the top is hidden in that state; this card is the
+       sign-in surface so the "please sign in" prompt is visually centered. -->
+  <div class="signed-out-hint" role="dialog" aria-label="Sign in">
+    <h2>🔒 Please sign in</h2>
+    <p>Enter the email an admin invited you with — we'll send you a 8-digit code.</p>
+
+    <div id="card-auth-signin" class="card-auth-row">
+      <input id="card-auth-email" type="email" placeholder="you@example.com" autocomplete="email" />
+      <button onclick="Supa.cardSignIn()">Send code</button>
+    </div>
+
+    <div id="card-auth-awaiting" class="card-auth-row" style="display:none;">
+      <span id="card-auth-awaiting-email" class="card-auth-awaiting-email"></span>
+      <input id="card-auth-code" type="text" inputmode="numeric" maxlength="8" placeholder="8-digit code"
+             style="letter-spacing:3px; text-align:center; font-family:monospace;" />
+      <button onclick="Supa.cardVerifyCode()">Verify</button>
+      <button class="secondary" onclick="Supa.cardCancelCode()">Cancel</button>
+    </div>
+
+    <div id="card-auth-message" class="card-auth-message" style="display:none;"></div>
   </div>
 
   <!-- RenewTech header logo -->
@@ -613,10 +666,24 @@ Click ⓘ in the header for the full list of things I can do.</div>
         <b>user</b> can edit projects they create or that are shared with them;
         <b>viewer</b> is read-only.
       </p>
+      <div style="border:1px solid #e5e7eb; border-radius:8px; padding:10px 12px; margin-bottom:10px; background:#f9fafb;">
+        <div style="font-weight:600; font-size:12px; color:#111827; margin-bottom:6px;">Invite a new user</div>
+        <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+          <input id="inviteEmail" type="email" placeholder="name@example.com"
+                 style="flex:1; min-width:220px; font-size:12px; padding:6px 10px;">
+          <select id="inviteRole" style="font-size:12px; padding:6px 8px;">
+            <option value="user" selected>user</option>
+            <option value="admin">admin</option>
+            <option value="viewer">viewer</option>
+          </select>
+          <button class="btn" id="inviteBtn" onclick="sendInvite()" style="background:#2563eb; color:white;">Invite</button>
+        </div>
+        <div id="inviteMessage" style="margin-top:6px; font-size:11px; display:none;"></div>
+      </div>
       <input id="usersSearch" type="text" placeholder="🔎 search by email…"
              style="width:100%; font-size:12px; padding:6px 10px; margin-bottom:8px;"
              oninput="renderUsersList()">
-      <div id="usersList" style="max-height:60vh; overflow:auto; border:1px solid #e5e7eb; border-radius:8px;"></div>
+      <div id="usersList" style="max-height:55vh; overflow:auto; border:1px solid #e5e7eb; border-radius:8px;"></div>
       <div class="modal-actions">
         <button class="btn btn-cancel" onclick="closeManageUsersModal()">Close</button>
       </div>
@@ -627,6 +694,11 @@ Click ⓘ in the header for the full list of things I can do.</div>
   <div class="modal-overlay" id="modal" style="display:none" onclick="if(event.target===this)closeModal()">
     <div class="modal">
       <h3 id="modalTitle">Edit Row</h3>
+      <div id="m-project-row" style="display:none; margin-bottom:9px;">
+        <label>Project <span style="font-weight:400; color:#9ca3af;">— which project this subtask belongs to</span>
+          <select id="m-project"></select>
+        </label>
+      </div>
       <div id="m-parent-row" style="display:none; margin-bottom:9px;">
         <label>Parent <span style="font-weight:400; color:#9ca3af;">— pick which project/task this row goes under</span>
           <select id="m-parent"></select>
@@ -866,14 +938,67 @@ Click ⓘ in the header for the full list of things I can do.</div>
     let pendingEmail  = null;   // email we sent the OTP code to, awaiting verification
     let supaToken     = null;   // cached access_token — keeps the hot upsert path off supabase-js
 
-    // ─── Auth: email OTP code (6-digit) — no clickable link, no prefetch issues ───
+    function setCardMessage(text, kind) {
+      const el = document.getElementById("card-auth-message");
+      if (!el) return;
+      if (!text) { el.style.display = "none"; el.textContent = ""; return; }
+      el.textContent = text;
+      el.className = "card-auth-message" + (kind ? " " + kind : "");
+      el.style.display = "";
+    }
+
+    // Pre-OTP gate: ask the check-email edge function whether the email is
+    // (a) on our domain and (b) already in profiles. We don't fall back to
+    // calling signInWithOtp when the function is unreachable — that would
+    // re-open the very quota leak this guard exists to close.
+    async function checkEmailAllowed(email) {
+      const useLocal = SUPA_CONFIG.useLocalEdge === true;
+      const base   = useLocal ? SUPA_CONFIG.localFunctionsBase  : SUPA_CONFIG.supabaseUrl;
+      const apikey = useLocal ? SUPA_CONFIG.localPublishableKey : SUPA_CONFIG.publishableKey;
+      const url    = `${base}/functions/v1/check-email`;
+      try {
+        const res = await loggedFetch(url, {
+          method: "POST",
+          headers: {
+            "apikey": apikey,
+            "Authorization": `Bearer ${apikey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ email }),
+        });
+        if (!res.ok) return { allowed: false, reason: "lookup_failed" };
+        const j = await res.json().catch(() => ({}));
+        return { allowed: !!j.allowed };
+      } catch (e) {
+        console.warn("[Supa] check-email failed:", e?.message || e);
+        return { allowed: false, reason: "network" };
+      }
+    }
+
+    // ─── Auth: email OTP code (8-digit) — no clickable link, no prefetch issues ───
     async function signIn(email) {
-      if (!email || !email.includes("@")) { alert("Enter a valid email"); return; }
+      email = (email || "").trim().toLowerCase();
+      if (!email || !email.includes("@")) {
+        setCardMessage("Enter a valid email.", "error");
+        return;
+      }
+      setCardMessage("Checking…", "info");
+      const { allowed } = await checkEmailAllowed(email);
+      if (!allowed) {
+        setCardMessage("We don't have an account for that email yet — ask an admin to invite you.", "error");
+        return;
+      }
+      setCardMessage("", "");
       const { error } = await supabase.auth.signInWithOtp({ email });
-      if (error) { alert("Send code failed: " + error.message); return; }
+      if (error) { setCardMessage("Send code failed: " + error.message, "error"); return; }
       pendingEmail = email;
       renderAuthBar({ awaitingCode: true, email });
     }
+
+    // UI button wrappers — pull values from the centered card inputs.
+    function cardSignIn()    { signIn(document.getElementById("card-auth-email")?.value || ""); }
+    function cardVerifyCode(){ verifyCode(document.getElementById("card-auth-code")?.value || ""); }
+    function cardCancelCode(){ cancelCode(); setCardMessage("", ""); }
 
     async function verifyCode(code) {
       if (!pendingEmail) { alert("Send a code first"); return; }
@@ -1239,12 +1364,18 @@ Click ⓘ in the header for the full list of things I can do.</div>
       }
       console.log(`[Supa] plan: ${inserts.length} insert, ${updates.length} update, ${byId.size - inserts.length - updates.length} unchanged`);
 
-      // INSERTS — batched.
+      // INSERTS — batched. Stamp owner_user_id on every insert so RLS
+      // accepts the row and `refreshEditableProjects` finds it on the next
+      // refresh. We do NOT stamp on UPDATE: that would let any editor
+      // overwrite the original creator's ownership.
       if (inserts.length) {
+        const insertsWithOwner = currentUserId
+          ? inserts.map(r => ({ ...r, owner_user_id: currentUserId }))
+          : inserts;
         const res = await rawPostgrest(
           "POST",
           "/rest/v1/tasks",
-          inserts,
+          insertsWithOwner,
           "return=representation",
           `tasks.insert(${inserts.length})`
         );
@@ -1534,6 +1665,27 @@ Click ⓘ in the header for the full list of things I can do.</div>
       } else {
         status.textContent = "Not signed in";
         signin.style.display = "";
+      }
+
+      // Mirror state into the centered card (visible only when body.signed-out).
+      const cardSignin  = document.getElementById("card-auth-signin");
+      const cardAwait   = document.getElementById("card-auth-awaiting");
+      const cardAwaitEm = document.getElementById("card-auth-awaiting-email");
+      if (cardSignin && cardAwait) {
+        cardSignin.style.display = "none";
+        cardAwait.style.display  = "none";
+        if (role) {
+          // signed in — the card is hidden by the body.signed-out toggle.
+        } else if (awaitingCode) {
+          cardAwait.style.display = "flex";
+          if (cardAwaitEm) cardAwaitEm.textContent = `Code sent to ${email}`;
+          setTimeout(() => {
+            const inp = document.getElementById("card-auth-code");
+            if (inp) { inp.value = ""; inp.focus(); }
+          }, 50);
+        } else {
+          cardSignin.style.display = "flex";
+        }
       }
     }
 
@@ -1872,14 +2024,43 @@ Click ⓘ in the header for the full list of things I can do.</div>
       return await res.json();
     }
 
+    // ─── Admin: invite a brand-new user via the invite-user edge function ───
+    // Sends Supabase's built-in invite email + creates the profiles row in one
+    // round-trip. Caller must be signed in as an admin; the edge function
+    // re-validates the role on the server.
+    async function inviteUser(email, role) {
+      const useLocal = SUPA_CONFIG.useLocalEdge === true;
+      const base   = useLocal ? SUPA_CONFIG.localFunctionsBase  : SUPA_CONFIG.supabaseUrl;
+      const apikey = useLocal ? SUPA_CONFIG.localPublishableKey : SUPA_CONFIG.publishableKey;
+      const token  = supaToken || apikey;
+      const url    = `${base}/functions/v1/invite-user`;
+      const res = await loggedFetch(url, {
+        method: "POST",
+        headers: {
+          "apikey": apikey,
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email, role }),
+      });
+      const text = await res.text().catch(() => "");
+      if (!res.ok) {
+        let msg = text;
+        try { msg = JSON.parse(text)?.error || text; } catch (_) {}
+        throw new Error(msg || `HTTP ${res.status}`);
+      }
+      try { return JSON.parse(text); } catch { return { ok: true }; }
+    }
+
     window.Supa = {
       signIn, verifyCode, cancelCode, signOut, loadBoard,
+      cardSignIn, cardVerifyCode, cardCancelCode,
       queueUpsertAll, deleteRows, forceSave, forceSaveWith,
       // sharing
       lookupUserByEmail, listShares, addShare, updateShare, removeShare,
       fetchProjectOwner, refreshEditableProjects, isInCloud,
       // admin
-      listAllProfiles, setUserRole,
+      listAllProfiles, setUserRole, inviteUser,
       // ai
       invokeChat,
       // exposed for the share UI
@@ -4005,6 +4186,40 @@ Phase                                Dur (d)   Predecessor
         </tbody>
       </table>`;
   }
+  function setInviteMessage(text, kind) {
+    const el = document.getElementById('inviteMessage');
+    if (!el) return;
+    if (!text) { el.style.display = 'none'; el.textContent = ''; return; }
+    el.textContent = text;
+    el.style.color = kind === 'error' ? '#991b1b' : (kind === 'ok' ? '#166534' : '#6b7280');
+    el.style.display = '';
+  }
+
+  async function sendInvite() {
+    const role = window.Supa?.currentRole?.();
+    if (role !== 'admin') { flashHint('Admins only'); return; }
+    const email = (document.getElementById('inviteEmail').value || '').trim().toLowerCase();
+    const newRole = document.getElementById('inviteRole').value;
+    if (!email || !email.includes('@')) {
+      setInviteMessage('Enter a valid email address.', 'error');
+      return;
+    }
+    const btn = document.getElementById('inviteBtn');
+    btn.disabled = true;
+    setInviteMessage('Sending invite…');
+    try {
+      await window.Supa.inviteUser(email, newRole);
+      setInviteMessage(`Invite sent to ${email}.`, 'ok');
+      document.getElementById('inviteEmail').value = '';
+      _usersCache = await window.Supa.listAllProfiles();
+      renderUsersList();
+    } catch (e) {
+      setInviteMessage(e?.message || 'Invite failed.', 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
   async function changeUserRole(userId, role) {
     const me = window.Supa.currentUserId();
     if (userId === me && role !== 'admin') {
@@ -4758,6 +4973,8 @@ Phase                                Dur (d)   Predecessor
     modalIdx = nodeIdx;
     document.getElementById('modalTitle').textContent = 'Edit ' + (typeFromId(NODES[nodeIdx].id) || 'row');
     document.getElementById('m-parent-row').style.display = 'none';  // editing → ID is fixed
+    const projectRow = document.getElementById('m-project-row');
+    if (projectRow) projectRow.style.display = 'none';
     fillModal(NODES[nodeIdx]);
     document.getElementById('modalDelBtn').style.display = '';
     document.getElementById('modal').style.display = 'flex';
@@ -4779,7 +4996,15 @@ Phase                                Dur (d)   Predecessor
     modalIdx = -1;
     const parentRow    = document.getElementById('m-parent-row');
     const parentSelect = document.getElementById('m-parent');
+    const projectRow   = document.getElementById('m-project-row');
+    // Reset project-row visibility — only the subtask branch turns it back on.
+    if (projectRow) projectRow.style.display = 'none';
     let suggestedId;
+
+    // Natural-numeric ID compare so the dropdowns list rows by PID:
+    // "P1, P2, P3, P10" instead of "P1, P10, P2, P3".
+    const byIdNumeric = (a, b) =>
+      String(a.id).localeCompare(String(b.id), undefined, { numeric: true, sensitivity: 'base' });
 
     if (type === 'project') {
       // Anyone non-viewer can create a fresh project. The CSS `.readonly`
@@ -4794,7 +5019,7 @@ Phase                                Dur (d)   Predecessor
       }
       // Only show projects the user actually has edit access to. Ignore the
       // Mine/Projects ▾ filter here — those affect display only, not capability.
-      const projects = allProjects.filter(n => canEditProject(n.id));
+      const projects = allProjects.filter(n => canEditProject(n.id)).sort(byIdNumeric);
       if (!projects.length) {
         alert("You don't have edit access to any project. Click + Project to create one of your own first.");
         return;
@@ -4814,20 +5039,45 @@ Phase                                Dur (d)   Predecessor
         alert("You need to create a Task first — Subtasks live under a Task. Click \"+ Task\" before adding a Subtask.");
         return;
       }
-      // Only tasks whose project the user can edit.
-      const tasks = allTasks.filter(t => canEditProject(t.id.split('-')[0]));
-      if (!tasks.length) {
-        alert("You don't have edit access to any task. Add a task under one of your own projects first.");
+      // Subtask flow: first pick the project, then pick the parent task within it.
+      const projects = NODES
+        .filter(n => typeFromId(n.id) === 'project' && canEditProject(n.id))
+        .sort(byIdNumeric);
+      if (!projects.length) {
+        alert("You don't have edit access to any project. Click + Project to create one of your own first.");
         return;
       }
+      const projectSelect = document.getElementById('m-project');
+      const projectRow    = document.getElementById('m-project-row');
+      projectRow.style.display = '';
+      projectSelect.innerHTML = projects.map(p =>
+        `<option value="${esc(p.id)}">${esc(p.id)} — ${esc(p.name)}</option>`
+      ).join('');
+      projectSelect.value = projects[0].id;
+
+      // Re-populate the parent-task select for the currently-selected project.
+      const fillTasksForProject = (projectId) => {
+        const tasksInProject = NODES
+          .filter(t => typeFromId(t.id) === 'task' && t.id.split('-')[0] === projectId)
+          .sort(byIdNumeric);
+        if (!tasksInProject.length) {
+          parentSelect.innerHTML = `<option value="">— no tasks yet in this project —</option>`;
+          parentSelect.value = '';
+          document.getElementById('m-id').value = '';
+          return;
+        }
+        parentSelect.innerHTML = tasksInProject.map(t =>
+          `<option value="${esc(t.id)}">${esc(t.id)} — ${esc(t.name)}</option>`
+        ).join('');
+        parentSelect.value = tasksInProject[0].id;
+        document.getElementById('m-id').value = nextId(parentSelect.value);
+      };
+
       parentRow.style.display = '';
-      parentSelect.innerHTML = tasks.map(t => {
-        const proj = NODES.find(n => n.id === t.id.split('-')[0]);
-        const projName = proj ? proj.name : '';
-        return `<option value="${esc(t.id)}">${esc(t.id)} — ${esc(t.name)}${projName ? ` · in ${esc(projName)}` : ''}</option>`;
-      }).join('');
-      parentSelect.value = tasks[0].id;
-      suggestedId = nextId(parentSelect.value);
+      fillTasksForProject(projects[0].id);
+      suggestedId = document.getElementById('m-id').value || nextId(projects[0].id);
+
+      projectSelect.onchange = () => fillTasksForProject(projectSelect.value);
       parentSelect.onchange = () => {
         document.getElementById('m-id').value = nextId(parentSelect.value);
       };
@@ -6367,7 +6617,40 @@ Phase                                Dur (d)   Predecessor
   }
 
   // ---- operation appliers — mutate the draft array ----
+  // For the given op, return the project id the user would have to be able
+  // to edit. Returns null when the op is read-only or creates a brand-new
+  // project (which anyone non-viewer is allowed to do).
+  function aiOpProjectId(op, draft) {
+    if (!op || !op.operation) return null;
+    if (op.operation === 'query_schedule')           return null;
+    if (op.operation === 'create_project_candidate') return null;
+    if (op.operation === 'create_item' && op.target?.item_type === 'project') return null;
+
+    if (op.operation === 'create_item') {
+      const projName = String(op.target?.project || '').trim().toLowerCase();
+      if (!projName || projName === 'n/a') return null;
+      const proj = draft.find(n =>
+        typeFromId(n.id) === 'project'
+        && String(n.name || '').toLowerCase() === projName
+      );
+      return proj ? proj.id : null;
+    }
+
+    const res = aiResolveTarget(op.target, draft);
+    if (!res || !res.ok || !res.id) return null;
+    return res.id.split('-')[0];
+  }
+
   function aiApplyOperation(op, draft) {
+    // RBAC gate — reject ops touching a project the user cannot edit. The
+    // chat edge function already tells the LLM about the user's scope, but
+    // we re-check here so a hand-crafted or out-of-date suggestion still
+    // can't slip through. Supabase RLS provides the final backstop.
+    const targetedProjectId = aiOpProjectId(op, draft);
+    if (targetedProjectId && !canEditProject(targetedProjectId)) {
+      return { ok: false, reason: 'permission_denied', projectId: targetedProjectId };
+    }
+
     switch (op.operation) {
       case 'shift_item':      return aiApplyShift(op, draft);
       case 'update_progress': return aiApplyProgress(op, draft);
@@ -7979,6 +8262,17 @@ Phase                                Dur (d)   Predecessor
     const result = aiApplyOperation(op, AI.draft);
     if (!result.ok) {
       let msg = '✗ ' + (result.reason || 'Could not apply');
+      if (result.reason === 'permission_denied') {
+        const pid = result.projectId || 'that project';
+        msg = `🔒 Skipped — you don't have edit access to ${pid}. Ask an admin to share the project with you (or for AI assistance only on projects you own).`;
+        if (AI.pendingChanges.length === 0) {
+          AI.draft = null; AI.baseSnapshot = null;
+        }
+        aiAppendMessage('assistant', msg);
+        aiRenderPreview();
+        aiProcessNext();
+        return;
+      }
       if (result.candidates && result.candidates.length && result.kind) {
         if (result.kind === 'owner') {
           aiAskOwnerChoice(op, result.candidates, result.queriedName, result.reason, messageText);
@@ -8767,6 +9061,14 @@ Phase                                Dur (d)   Predecessor
   }
 
   function aiTogglePanel() {
+    // Viewers are blocked at the edge function too, but bail here so a
+    // viewer who manually unhides the button via devtools still can't fire
+    // a chat request from the panel UI.
+    const role = window.Supa?.currentRole?.();
+    if (role === 'viewer') {
+      flashHint('Viewers cannot use the AI assistant.');
+      return;
+    }
     const p = document.getElementById('ai-panel');
     if (!p) return;
     p.classList.toggle('open');
