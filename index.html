@@ -5783,6 +5783,197 @@ Phase                                Dur (d)   Predecessor
     });
   }
 
+  // ── CSV import wizard: pure helpers (also used by tests) ──
+  // detectImportConflicts: returns Map<importedProjId, existingProjId>
+  // for projects whose id AND name both match (case-sensitive).
+  function detectImportConflicts(imported, existing) {
+    const existingByKey = new Map();
+    for (const n of existing) {
+      if (n.type !== 'project') continue;
+      existingByKey.set(`${n.id}${n.name}`, n.id);
+    }
+    const out = new Map();
+    for (const n of imported) {
+      if (n.type !== 'project') continue;
+      const key = `${n.id}${n.name}`;
+      if (existingByKey.has(key)) out.set(n.id, existingByKey.get(key));
+    }
+    return out;
+  }
+
+  // Renumber imported tasks/subtasks of one project to slot under an
+  // existing project at the next free T-number. Returns { nodes, remap }.
+  function renumberMergedTasks(existingProjectId, existingNodes, importedNodesForProject) {
+    const re = new RegExp('^' + existingProjectId + '-T(\\d+)$');
+    let maxT = 0;
+    for (const n of existingNodes) {
+      const m = (n.id || '').match(re);
+      if (m) {
+        const num = parseInt(m[1], 10);
+        if (num > maxT) maxT = num;
+      }
+    }
+    const proj = importedNodesForProject.find(n => n.type === 'project');
+    if (!proj) return { nodes: [], remap: new Map() };
+    const importedPid = proj.id;
+    const tasksInOrder = importedNodesForProject
+      .filter(n => {
+        const segs = (n.id || '').split('-');
+        return segs.length === 2 && segs[0] === importedPid;
+      })
+      .sort((a, b) => {
+        const an = parseInt((a.id.match(/-T(\d+)$/) || [0, 0])[1], 10);
+        const bn = parseInt((b.id.match(/-T(\d+)$/) || [0, 0])[1], 10);
+        return an - bn;
+      });
+    const remap = new Map();
+    remap.set(importedPid, existingProjectId);
+    let nextT = maxT;
+    for (const t of tasksInOrder) {
+      nextT++;
+      remap.set(t.id, `${existingProjectId}-T${nextT}`);
+    }
+    for (const n of importedNodesForProject) {
+      const segs = (n.id || '').split('-');
+      if (segs.length !== 3) continue;
+      const taskOldId = `${segs[0]}-${segs[1]}`;
+      const newTaskId = remap.get(taskOldId);
+      if (!newTaskId) continue;
+      remap.set(n.id, `${newTaskId}-${segs[2]}`);
+    }
+    const nodes = importedNodesForProject
+      .filter(n => n.type !== 'project')
+      .map(n => ({ ...n, id: remap.get(n.id) || n.id }));
+    return { nodes, remap };
+  }
+
+  function rewriteImportPreds(remap, nodes) {
+    return nodes.map(n => {
+      if (!n.predecessors) return n;
+      const rewritten = n.predecessors
+        .split(/[,;]/)
+        .map(p => p.trim())
+        .filter(Boolean)
+        .map(p => remap.get(p) || p)
+        .join(', ');
+      return { ...n, predecessors: rewritten };
+    });
+  }
+
+  // ── CSV import wizard: modal state + render ──
+  let importState = null;  // { fileName, parsed, mapping, rows[], conflictMap }
+
+  function openImportModal(fileName, importedNodes) {
+    const conflicts = detectImportConflicts(importedNodes, NODES);
+    const projects = importedNodes.filter(n => n.type === 'project');
+    const taskCountByProj = new Map();
+    for (const n of importedNodes) {
+      if (n.type === 'project') continue;
+      const pid = (n.id || '').split('-')[0];
+      taskCountByProj.set(pid, (taskCountByProj.get(pid) || 0) + 1);
+    }
+    importState = {
+      fileName,
+      importedNodes,
+      conflictMap: conflicts,
+      rows: projects.map(p => ({
+        id: p.id,
+        name: p.name,
+        included: true,
+        conflict: conflicts.has(p.id),
+        existingId: conflicts.get(p.id) || null,
+        resolution: conflicts.has(p.id) ? 'new' : null,
+        taskCount: taskCountByProj.get(p.id) || 0,
+      })),
+    };
+    document.getElementById('im-title').textContent = `📥 Import from ${fileName}`;
+    document.getElementById('im-summary').textContent =
+      `${projects.length} project(s), ${importedNodes.length - projects.length} task/subtask(s) found. ` +
+      `${conflicts.size} conflict(s) detected.`;
+    renderImportRows();
+    document.getElementById('importModal').style.display = 'flex';
+  }
+
+  function closeImportModal() {
+    document.getElementById('importModal').style.display = 'none';
+    importState = null;
+  }
+
+  function imRowsBy(id) { return importState?.rows.find(r => r.id === id); }
+
+  function renderImportRows() {
+    const wrap = document.getElementById('im-rows');
+    if (!importState) { wrap.innerHTML = ''; return; }
+    wrap.innerHTML = importState.rows.map(r => {
+      const conflictChip = r.conflict
+        ? '<span style="font-size:10px; padding:2px 6px; border-radius:10px; background:#fee2e2; color:#7f1d1d; margin-left:6px;">Conflict — exists on board</span>'
+        : '';
+      const dropdown = r.conflict ? `
+        <select onchange="imSetResolution('${esc(r.id)}', this.value)" style="font-size:11px; padding:3px 6px; margin-left:8px;">
+          <option value="new"        ${r.resolution === 'new'        ? 'selected' : ''}>Import as new</option>
+          <option value="keep"       ${r.resolution === 'keep'       ? 'selected' : ''}>Keep mine</option>
+          <option value="overwrite"  ${r.resolution === 'overwrite'  ? 'selected' : ''}>Overwrite mine</option>
+          <option value="merge"      ${r.resolution === 'merge'      ? 'selected' : ''}>Merge</option>
+        </select>` : '';
+      const includeDisabled = r.conflict && r.resolution === 'keep';
+      const includeChecked  = r.included && !includeDisabled;
+      const warn = (r.conflict && r.resolution === 'overwrite')
+        ? `<div style="font-size:10px; color:#92400e; margin-top:4px; margin-left:24px;">⚠ Predecessor refs from other projects into this one will become dangling.</div>`
+        : '';
+      return `
+        <div style="padding:8px 12px; border-bottom:1px solid #f3f4f6; display:flex; align-items:center; flex-wrap:wrap;">
+          <input type="checkbox" ${includeChecked ? 'checked' : ''} ${includeDisabled ? 'disabled' : ''}
+                 onchange="imSetIncluded('${esc(r.id)}', this.checked)" style="margin-right:8px;">
+          <span style="font-weight:600; color:#111827;">${esc(r.name || '(no name)')}</span>
+          <span style="font-size:10px; color:#9ca3af; margin-left:6px;">${esc(r.id)}</span>
+          <span style="font-size:10px; color:#6b7280; margin-left:6px;">· ${r.taskCount} task/subtask(s)</span>
+          ${conflictChip}
+          ${dropdown}
+          <div style="flex-basis:100%;">${warn}</div>
+        </div>`;
+    }).join('');
+    updateImportFooter();
+  }
+
+  function imSetIncluded(id, checked) {
+    const r = imRowsBy(id); if (!r) return;
+    r.included = checked;
+    updateImportFooter();
+  }
+  function imSetResolution(id, resolution) {
+    const r = imRowsBy(id); if (!r) return;
+    r.resolution = resolution;
+    if (resolution === 'keep') r.included = false;
+    else if (!r.included)      r.included = true;
+    renderImportRows();
+  }
+  function imSelectAll(checked) {
+    if (!importState) return;
+    for (const r of importState.rows) {
+      if (r.conflict && r.resolution === 'keep') continue;
+      r.included = checked;
+    }
+    renderImportRows();
+  }
+  function imApplyDefaultResolution(value) {
+    if (!importState || !value) return;
+    for (const r of importState.rows) {
+      if (!r.conflict) continue;
+      r.resolution = value;
+      if (value === 'keep') r.included = false;
+      else if (!r.included) r.included = true;
+    }
+    renderImportRows();
+  }
+  function updateImportFooter() {
+    if (!importState) return;
+    const included = importState.rows.filter(r => r.included);
+    const taskCount = included.reduce((s, r) => s + r.taskCount, 0);
+    document.getElementById('im-footer').textContent =
+      `${included.length} of ${importState.rows.length} project(s) will be imported · ${taskCount} task/subtask(s)`;
+    document.getElementById('im-confirm').disabled = !included.length;
+  }
+
   const dropOverlay = document.getElementById('dropOverlay');
   ['dragenter','dragover'].forEach(evt => {
     document.body.addEventListener(evt, e => {
