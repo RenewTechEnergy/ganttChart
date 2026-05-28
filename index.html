@@ -580,7 +580,7 @@
     <div style="margin-top:14px; font-size:11px; color:#4b5563; line-height:1.7;">
       <div style="font-weight:700; color:#374151; margin-bottom:6px;">Notes</div>
       <div>• <b>Hierarchy:</b> Project (P) ▸ Task (P-T) ▸ Subtask (P-T-S). Edit subtask data; tasks and projects roll up automatically (earliest start, latest end, summed costs).</div>
-      <div>• <b>Scheduled vs Actual:</b> <b>Scheduled</b> dates are the plan — set when a row is created and only changed by opening the edit modal. <b>Actual</b> dates track what really happened (or is happening). Dragging a bar shifts <b>actual</b> dates only; the schedule stays put as a baseline to measure delay against.</div>
+      <div>• <b>Scheduled vs Actual:</b> <b>Scheduled</b> dates are the plan — the baseline to measure delay against. <b>Actual</b> dates track what really happened (or is happening). Dragging a bar edits whichever set is currently shown by the view toggle: drag in <b>Actual</b> view shifts actual dates; drag in <b>Scheduled</b> view shifts the baseline.</div>
       <div>• <b>Predecessors:</b> comma-separated list of IDs that must finish before this one can start (Finish-to-Start). A subtask's status is locked at "Not Started" until every predecessor reaches "Done".</div>
       <div>• <b>Buffer (days):</b> how many days a subtask can be delayed without delaying the project end. Buffer = 0 → critical path (★).</div>
       <div>• <b>Critical path:</b> the chain of subtasks with Buffer = 0 (★). Any delay on these slips the project finish — focus management attention here.</div>
@@ -5058,9 +5058,15 @@ Phase                                Dur (d)   Predecessor
       return;
     }
     // Determine the bar's currently visible span: rolled-up for parents, stored for leaves.
+    // Which field-set we mutate depends on VIEW_MODE — scheduled drag edits sched_*, actual drag edits actual_*.
+    const useSched = (VIEW_MODE === 'scheduled');
     const range = eDateRange(n);
-    const origStart = isParent ? (range.actualStart || range.schedStart) : (n.actual_start || n.sched_start);
-    const origEnd   = isParent ? (range.actualEnd   || range.schedEnd)   : (n.actual_end   || n.sched_end);
+    const origStart = isParent
+      ? (useSched ? range.schedStart : (range.actualStart || range.schedStart))
+      : (useSched ? n.sched_start    : (n.actual_start    || n.sched_start));
+    const origEnd   = isParent
+      ? (useSched ? range.schedEnd   : (range.actualEnd   || range.schedEnd))
+      : (useSched ? n.sched_end      : (n.actual_end      || n.sched_end));
     if (!origStart || !origEnd) return;
     pushHistory();
     // For parent moves, snapshot every descendant's dates so each mousemove can apply
@@ -5074,7 +5080,7 @@ Phase                                Dur (d)   Predecessor
         origSchedStart:  c.sched_start,  origSchedEnd:  c.sched_end,
       }));
     }
-    drag = { type, ri, nodeIdx, startX: e.clientX, origStart, origEnd, isParent, childSnapshot };
+    drag = { type, ri, nodeIdx, startX: e.clientX, origStart, origEnd, isParent, childSnapshot, useSched };
     const tlEl = document.getElementById(`tl-${ri}`);
     if (tlEl) tlRect = tlEl.getBoundingClientRect();
     const bar = document.getElementById(`bar-${ri}`);
@@ -5096,18 +5102,22 @@ Phase                                Dur (d)   Predecessor
     const dd = deltaDays >= 0 ? `+${deltaDays}d` : `${deltaDays}d`;
 
     if (drag.isParent && drag.childSnapshot) {
-      // Dragging shifts only actual_* — the SCHEDULE is the plan, set when the
-      // row is created, and stays put unless explicitly edited in the modal.
-      // Actual_* tracks what really happened (or is currently happening).
+      // Which date-set we shift depends on the current view: scheduled drag edits the
+      // baseline plan (sched_*), actual drag edits live PM dates (actual_*).
       const shift = (iso) => iso ? fmtDate(addDays(new Date(iso), deltaDays)) : iso;
       drag.childSnapshot.forEach(snap => {
-        snap.ref.actual_start = shift(snap.origActualStart);
-        snap.ref.actual_end   = shift(snap.origActualEnd);
+        if (drag.useSched) {
+          snap.ref.sched_start = shift(snap.origSchedStart);
+          snap.ref.sched_end   = shift(snap.origSchedEnd);
+        } else {
+          snap.ref.actual_start = shift(snap.origActualStart);
+          snap.ref.actual_end   = shift(snap.origActualEnd);
+        }
       });
       // Update the parent bar from new rollup
       const range = eDateRange(n);
-      const newStart = range.actualStart || range.schedStart;
-      const newEnd   = range.actualEnd   || range.schedEnd;
+      const newStart = drag.useSched ? range.schedStart : (range.actualStart || range.schedStart);
+      const newEnd   = drag.useSched ? range.schedEnd   : (range.actualEnd   || range.schedEnd);
       const sp = pct(newStart), ep = pct(newEnd), w = Math.max(0.5, ep - sp);
       const bar = document.getElementById(`bar-${drag.ri}`);
       if (bar) { bar.style.left = sp + '%'; bar.style.width = w + '%'; }
@@ -5121,15 +5131,21 @@ Phase                                Dur (d)   Predecessor
     if (drag.type === 'move')        { s = addDays(s, deltaDays); en = addDays(en, deltaDays); }
     else if (drag.type === 'left')   { s = addDays(s, deltaDays); if (s >= en) s = addDays(en, -1); }
     else if (drag.type === 'right')  { en = addDays(en, deltaDays); if (en <= s) en = addDays(s, 1); }
-    n.actual_start = fmtDate(s); n.actual_end = fmtDate(en);
+    if (drag.useSched) {
+      n.sched_start = fmtDate(s); n.sched_end = fmtDate(en);
+    } else {
+      n.actual_start = fmtDate(s); n.actual_end = fmtDate(en);
+    }
 
-    const sp = pct(n.actual_start); const ep = pct(n.actual_end); const w = Math.max(0.5, ep - sp);
+    const startISO = drag.useSched ? n.sched_start : n.actual_start;
+    const endISO   = drag.useSched ? n.sched_end   : n.actual_end;
+    const sp = pct(startISO); const ep = pct(endISO); const w = Math.max(0.5, ep - sp);
     const bar = document.getElementById(`bar-${drag.ri}`);
     if (bar) { bar.style.left = sp + '%'; bar.style.width = w + '%'; }
 
-    dt.textContent = drag.type === 'left'  ? `Start: ${n.actual_start} (${dd})`
-                  : drag.type === 'right' ? `End: ${n.actual_end} (${dd})`
-                  : `${n.actual_start} → ${n.actual_end} (${dd})`;
+    dt.textContent = drag.type === 'left'  ? `Start: ${startISO} (${dd})`
+                  : drag.type === 'right' ? `End: ${endISO} (${dd})`
+                  : `${startISO} → ${endISO} (${dd})`;
     dt.style.left = (e.clientX + 14) + 'px';
     dt.style.top  = (e.clientY - 30) + 'px';
   });
@@ -5141,9 +5157,15 @@ Phase                                Dur (d)   Predecessor
     const n = NODES[drag.nodeIdx];
     // For parent drags we mutated children — always commit on mouseup.
     // For leaf drags only commit if the stored dates actually changed.
+    // Compare against the same field-set we mutated (sched_* in scheduled view, actual_* otherwise).
     const moved = drag.isParent
-      ? (drag.childSnapshot || []).some(s => s.ref.actual_start !== s.origActualStart || s.ref.actual_end !== s.origActualEnd)
-      : (n.actual_start !== drag.origStart || n.actual_end !== drag.origEnd);
+      ? (drag.childSnapshot || []).some(s =>
+          drag.useSched
+            ? (s.ref.sched_start  !== s.origSchedStart  || s.ref.sched_end  !== s.origSchedEnd)
+            : (s.ref.actual_start !== s.origActualStart || s.ref.actual_end !== s.origActualEnd))
+      : (drag.useSched
+          ? (n.sched_start  !== drag.origStart || n.sched_end  !== drag.origEnd)
+          : (n.actual_start !== drag.origStart || n.actual_end !== drag.origEnd));
     if (moved) {
       // Reschedule downstream — for parent drag we may have moved many descendants, so reschedule each project that was touched.
       const projectsTouched = new Set();
