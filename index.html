@@ -6018,6 +6018,29 @@ Phase                                Dur (d)   Predecessor
       node.percent_done = 0;
     }
 
+    // If this is a rename of an existing row, build the cascade map (descendants
+    // inherit the new prefix) and validate up-front so we don't half-rename and abort.
+    let renameMap = null;
+    const prevId = (modalIdx >= 0) ? NODES[modalIdx].id : null;
+    if (prevId && prevId !== id) {
+      renameMap = new Map([[prevId, id]]);
+      NODES.forEach((n, i) => {
+        if (i === modalIdx) return;
+        if (n.id.startsWith(prevId + '-')) {
+          renameMap.set(n.id, id + n.id.substring(prevId.length));
+        }
+      });
+      // Reject if any cascaded descendant id would collide with an untouched node.
+      for (const [from, to] of renameMap) {
+        if (from === prevId) continue;
+        const clash = NODES.some((n, i) => i !== modalIdx && !renameMap.has(n.id) && n.id === to);
+        if (clash) {
+          alert(`Cannot rename "${prevId}" → "${id}": descendant "${from}" would become "${to}", which already exists.`);
+          return;
+        }
+      }
+    }
+
     // Detect ID collisions
     const conflictIdx = NODES.findIndex((n, i) => n.id === id && i !== modalIdx);
     if (conflictIdx >= 0) {
@@ -6029,6 +6052,36 @@ Phase                                Dur (d)   Predecessor
     const prevNode = (modalIdx >= 0) ? {...NODES[modalIdx]} : null;
     if (modalIdx === -1) NODES.push(node);
     else                 NODES[modalIdx] = node;
+
+    // Apply the rename cascade: descendants get the new prefix, and any predecessor
+    // strings that referenced renamed ids are rewritten to point at the new ones.
+    let renamedOldIds = null;
+    if (renameMap) {
+      renamedOldIds = [];
+      NODES.forEach((n, i) => {
+        if (i === modalIdx) return;
+        const next = renameMap.get(n.id);
+        if (next) { renamedOldIds.push(n.id); n.id = next; }
+      });
+      NODES.forEach(n => {
+        if (!n.predecessors) return;
+        const parts = String(n.predecessors).split(/[,;]\s*/).map(s => s.trim()).filter(Boolean);
+        let changed = false;
+        const next = parts.map(p => {
+          if (renameMap.has(p)) { changed = true; return renameMap.get(p); }
+          return p;
+        });
+        if (changed) n.predecessors = next.join(', ');
+      });
+      // Project filter tracks project ids — keep it in sync if the renamed row was a project.
+      if (typeFromId(prevId) === 'project' && selectedProjects.has(prevId)) {
+        selectedProjects.delete(prevId);
+      }
+      // Delete the old server-side rows; saveLocal below upserts the new ids.
+      if (window.Supa) {
+        window.Supa.deleteRows([prevId, ...renamedOldIds]);
+      }
+    }
 
     // Make sure the new row is actually visible after save:
     // its root project must be in the project filter, and its owner (if any)
