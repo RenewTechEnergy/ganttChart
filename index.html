@@ -58,6 +58,26 @@
     .btn-save.is-dirty { background: #f59e0b; }
     .btn-save.is-dirty:hover { background: #d97706; }
     .btn-save.is-syncing { background: #6b7280; cursor: progress; }
+    .btn-sync { background: #16a34a; color: white; font-weight: 700; }
+    .btn-sync:hover { background: #15803d; }
+    .btn-sync.is-dirty { background: #f59e0b; }       /* amber = local edits not yet uploaded */
+    .btn-sync.is-dirty:hover { background: #d97706; }
+    .btn-sync.is-syncing { background: #6b7280; cursor: progress; }
+    /* ── Sync dialog ── */
+    .sync-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+    .sync-dialog { background: #fff; border-radius: 12px; padding: 20px; width: 440px; max-width: 92vw; box-shadow: 0 20px 60px rgba(0,0,0,0.3); font-family: inherit; }
+    .sync-dialog .sync-title { font-size: 17px; font-weight: 700; color: #111827; margin-bottom: 6px; }
+    .sync-dialog .sync-sub { font-size: 12px; color: #6b7280; margin-bottom: 16px; line-height: 1.45; }
+    .sync-act { display: block; width: 100%; text-align: left; padding: 12px 14px; margin-bottom: 10px; border: 1px solid #d1d5db; border-radius: 8px; background: #f9fafb; cursor: pointer; font-size: 14px; font-weight: 700; color: #111827; }
+    .sync-act:hover:not(:disabled) { background: #eef2ff; border-color: #6366f1; }
+    .sync-act:disabled { opacity: 0.5; cursor: progress; }
+    .sync-act small { display: block; font-weight: 400; font-size: 11px; color: #6b7280; margin-top: 3px; line-height: 1.4; }
+    .sync-result { font-size: 12px; line-height: 1.5; padding: 10px 12px; border-radius: 8px; background: #f3f4f6; color: #374151; margin: 4px 0 12px; white-space: pre-wrap; }
+    .sync-result.ok { background: #dcfce7; color: #166534; }
+    .sync-result.warn { background: #fef3c7; color: #92400e; }
+    .sync-result.err { background: #fee2e2; color: #991b1b; }
+    .sync-close { width: 100%; padding: 9px; border: none; border-radius: 8px; background: #e5e7eb; color: #374151; font-weight: 600; cursor: pointer; }
+    .sync-close:hover { background: #d1d5db; }
     .btn-mine { background: #0e7490; color: white; }
     .btn-mine:hover { background: #155e75; }
     .btn-mine.is-active { background: #155e75; box-shadow: inset 0 0 0 2px white, 0 0 0 2px #0e7490; }
@@ -240,7 +260,7 @@
     body.readonly .btn-add-t,
     body.readonly .btn-add-s,
     body.readonly .btn-reset,
-    body.readonly .btn-save { pointer-events: none; opacity: 0.4; }
+    body.readonly .btn-save, body.readonly .btn-sync { pointer-events: none; opacity: 0.4; }
     body.readonly .bar { cursor: default !important; }
 
     /* ── AI editing panel ── */
@@ -513,7 +533,21 @@
     <div class="spacer"></div>
     <button class="btn btn-pdf"  onclick="exportPDF()" title="Download as PDF">🖨 PDF</button>
     <button class="btn btn-png"  onclick="exportPNG()" title="Download as PNG">🖼 PNG</button>
-    <button class="btn btn-save" id="saveBtn" onclick="manualCloudSave()" title="Push edits to Supabase now">💾 Save</button>
+    <button class="btn btn-sync" id="syncBtn" onclick="openSyncDialog()" title="Sync with the cloud (upload your changes or replace from cloud)">🔄 Sync</button>
+    <div id="syncOverlay" class="sync-overlay" style="display:none">
+      <div class="sync-dialog">
+        <div class="sync-title">Sync with cloud</div>
+        <div class="sync-sub">Your edits are saved in this browser automatically. Nothing is sent to the cloud until you upload. Choose a direction:</div>
+        <button class="sync-act" id="syncPushBtn" onclick="doSyncPush()">⬆ Upload local → cloud
+          <small>Save your changes to Supabase. Rows another user changed first are skipped and reported, not overwritten.</small>
+        </button>
+        <button class="sync-act" id="syncPullBtn" onclick="doSyncPull()">⬇ Replace local ← cloud
+          <small>Discard local changes and load the latest cloud version. A local backup is saved first.</small>
+        </button>
+        <div id="syncResult" class="sync-result" style="display:none"></div>
+        <button class="sync-close" onclick="closeSyncDialog()">Cancel</button>
+      </div>
+    </div>
     <button class="btn btn-mine" id="mineBtn" onclick="toggleMineFilter()" title="Show only projects you can edit">👤 Mine</button>
     <button class="btn btn-users" id="usersBtn" onclick="openManageUsersModal()" title="Assign admin / user / viewer roles" style="display:none; background:#7c3aed; color:white;">⚙ Users</button>
     <button class="btn btn-xlsx" onclick="exportCSV()" title="Download a CSV snapshot (full round-trip)">📄 Export CSV</button>
@@ -584,7 +618,7 @@
       <div>• <b>Predecessors:</b> comma-separated list of IDs that must finish before this one can start (Finish-to-Start). A subtask's status is locked at "Not Started" until every predecessor reaches "Done".</div>
       <div>• <b>Buffer (days):</b> how many days a subtask can be delayed without delaying the project end. Buffer = 0 → critical path (★).</div>
       <div>• <b>Critical path:</b> the chain of subtasks with Buffer = 0 (★). Any delay on these slips the project finish — focus management attention here.</div>
-      <div>• <b>Status:</b> only editable on subtasks. Pick one of Not Started / In Progress / Delayed / Done. Tasks and projects roll up by priority — <i>any Delayed → Delayed; else all Done → Done; else any Done or any In Progress → In Progress (work has begun); else Not Started</i>. Picking "Delayed" prompts for a new end date and reschedules downstream tasks.</div>
+      <div>• <b>Status:</b> editable on any row with no children — a leaf task, a subtask, or a childless project. Pick one of Not Started / In Progress / Delayed / Done. Rows that have children roll up by priority — <i>any Delayed → Delayed; else all Done → Done; else any Done or any In Progress → In Progress (work has begun); else Not Started</i>. Picking "Delayed" prompts for a new end date and reschedules downstream tasks.</div>
       <div>• <b>Variance =</b> Quoted Cost − (Actual Spend + Committed). Negative means projected overrun.</div>
       <div>• <b>Project Margin =</b> Sale Price − Estimated Raw Cost (proposal-stage). <b>Final Margin =</b> Sale Price − (Actual + Committed), locked when every subtask is Done.</div>
       <div>• <b>Row grouping:</b> use the ▾/▸ arrows next to project/task rows to collapse subtasks, or "⊟ Collapse" in the toolbar.</div>
@@ -1499,6 +1533,7 @@ Click ⓘ in the header for the full list of things I can do.</div>
         sched_start: r.sched_start, sched_end: r.sched_end,
         actual_start: r.actual_start, actual_end: r.actual_end,
         slack_days: r.slack_days, pct_done: r.pct_done,
+        status: r.status ?? null,
         est_cost: r.est_cost, cost_to_date: r.cost_to_date,
         sale_price: r.sale_price,
         version: r.version != null ? Number(r.version) : 1,
@@ -1545,6 +1580,7 @@ Click ⓘ in the header for the full list of things I can do.</div>
         actual_end:   r.actual_end   || "",
         slack: r.slack_days != null ? String(r.slack_days) : "",
         percent_done: Number(r.pct_done) || 0,
+        status: r.status || "",
         est_cost:     r.est_cost     != null ? Number(r.est_cost)     : "",
         cost_to_date: r.cost_to_date != null ? Number(r.cost_to_date) : "",
         sale_price:   r.sale_price   != null ? Number(r.sale_price)   : "",
@@ -1564,33 +1600,21 @@ Click ⓘ in the header for the full list of things I can do.</div>
     let pendingNodes   = null;
     let flushScheduled = false;     // microtask-level coalescing flag
 
+    // MANUAL SYNC MODE: edits never auto-push to the cloud. We still mark the
+    // rows the user touched as dirty so (a) realtime echoes don't clobber an
+    // in-flight edit and (b) the conflict-aware push knows what changed. The
+    // actual cloud write happens only when the user clicks Sync → Upload
+    // (openSyncDialog → syncPush). Local cache is saved separately by saveLocal.
     function queueUpsertAll(nodes) {
-      console.log("[Supa] queueUpsertAll:", nodes.length, "nodes — userId:", currentUserId, "role:", currentRole, "visible:", document.visibilityState);
-      if (!currentUserId)              { console.log("[Supa] skip: not signed in"); return; }
-      if (currentRole === "viewer")    { console.log("[Supa] skip: viewer role"); return; }
-      pendingNodes = structuredClone(nodes);
-
-      // Mark locally-modified ids as dirty synchronously, so realtime echoes
-      // arriving between now and the network round-trip don't overwrite the
-      // user's in-flight edits.
+      if (!currentUserId)           return;
+      if (currentRole === "viewer") return;
       for (const n of nodes) {
         const seen = serverRows.get(n.id);
         const rowDiff  = !seen || rowChanged(nodeToDbRow(n), seen);
         const predDiff = predSignature(n.predecessors) !== (serverPreds.get(n.id) || "");
         if (rowDiff || predDiff) dirtyIds.add(n.id);
       }
-
-      if (document.visibilityState !== "visible") {
-        logPending("[Supa] tab hidden — deferring, queued");
-        return;
-      }
-      // Coalesce multiple edits in the same JS turn into a single flush.
-      if (flushScheduled) return;
-      flushScheduled = true;
-      queueMicrotask(() => {
-        flushScheduled = false;
-        flushPending();
-      });
+      // No flush here — pendingNodes/flushPending stay inert in manual mode.
     }
 
     // Every flush fires upsertAll fire-and-forget via .then(). No queue lock.
@@ -1669,6 +1693,7 @@ Click ⓘ in the header for the full list of things I can do.</div>
         actual_end: n.actual_end || null,
         slack_days: n.slack === "" || n.slack == null ? null : parseInt(n.slack, 10),
         pct_done: Number(n.percent_done) || 0,
+        status: n.status || null,
         est_cost: Number(n.est_cost) || 0,
         cost_to_date: Number(n.cost_to_date) || 0,
         sale_price: Number(n.sale_price) || 0,
@@ -1691,6 +1716,7 @@ Click ⓘ in the header for the full list of things I can do.</div>
         actual_end:    r.actual_end   || null,
         slack_days:    r.slack_days == null ? null : Number(r.slack_days),
         pct_done:      num(r.pct_done),
+        status:        r.status || null,
         est_cost:      num(r.est_cost),
         cost_to_date:  num(r.cost_to_date),
         sale_price:    num(r.sale_price),
@@ -1782,63 +1808,100 @@ Click ⓘ in the header for the full list of things I can do.</div>
       }
       console.log(`[Supa] plan: ${inserts.length} insert, ${updates.length} update, ${byId.size - inserts.length - updates.length} unchanged`);
 
-      // INSERTS — batched. Stamp owner_user_id on every insert so RLS
-      // accepts the row and `refreshEditableProjects` finds it on the next
-      // refresh. We do NOT stamp on UPDATE: that would let any editor
-      // overwrite the original creator's ownership.
+      // Categorized outcome — returned to the caller so the UI can tell the
+      // truth (saved / conflict / denied / failed) instead of always "Saved".
+      const written   = [];   // ids that landed (insert or update)
+      const conflicts = [];   // empty PATCH + server version advanced (someone else won)
+      const denied    = [];   // empty PATCH + version unchanged (RLS/permission dropped it)
+      const errors    = [];   // { id, error } — request threw (network / 4xx / 5xx)
+
+      // Apply a created/updated row to the local caches and mark it written.
+      const acceptRow = (r) => {
+        serverRows.set(r.id, rowToServerSnapshot(r));
+        markRecentWrite(r.id, r.version);
+        dirtyIds.delete(r.id);
+        written.push(r.id);
+      };
+
+      // INSERTS — batched, with per-row fallback. Stamp owner_user_id on every
+      // insert so RLS accepts the row and `refreshEditableProjects` finds it on
+      // the next refresh. We do NOT stamp on UPDATE: that would let any editor
+      // overwrite the original creator's ownership. A 409/4xx on one row must
+      // not sink the rest of the save — fall back to per-row inserts.
+      const stamp = (r) => (currentUserId ? { ...r, owner_user_id: currentUserId } : r);
+      const insertOne = async (row) => {
+        try {
+          const res = await rawPostgrest(
+            "POST", "/rest/v1/tasks", [stamp(row)],
+            "return=representation", `tasks.insert:${row.id}`
+          );
+          const created = await res.json().catch(() => []);
+          if (created && created.length) acceptRow(created[0]);
+          else errors.push({ id: row.id, error: "insert returned no row" });
+        } catch (e) {
+          errors.push({ id: row.id, error: e?.message || String(e) });
+        }
+      };
       if (inserts.length) {
-        const insertsWithOwner = currentUserId
-          ? inserts.map(r => ({ ...r, owner_user_id: currentUserId }))
-          : inserts;
-        const res = await rawPostgrest(
-          "POST",
-          "/rest/v1/tasks",
-          insertsWithOwner,
-          "return=representation",
-          `tasks.insert(${inserts.length})`
-        );
-        const created = await res.json().catch(() => []);
-        for (const r of created) {
-          serverRows.set(r.id, rowToServerSnapshot(r));
-          markRecentWrite(r.id, r.version);
-          dirtyIds.delete(r.id);
+        try {
+          const res = await rawPostgrest(
+            "POST", "/rest/v1/tasks", inserts.map(stamp),
+            "return=representation", `tasks.insert(${inserts.length})`
+          );
+          const created = await res.json().catch(() => []);
+          for (const r of created) acceptRow(r);
+          // If the batch silently dropped some rows, retry just those per-row.
+          const landed = new Set(created.map(r => r.id));
+          for (const row of inserts) if (!landed.has(row.id)) await insertOne(row);
+        } catch (e) {
+          console.warn("[Supa] batch insert failed, retrying per-row:", e?.message || e);
+          for (const row of inserts) await insertOne(row);
         }
       }
 
       // UPDATES — per-row with OCC. PostgREST URL filter `version=eq.<seen>`
       // makes the WHERE clause; if version has moved on the server the response
-      // is an empty array.
-      const conflicts = [];
+      // is an empty array. An empty array is ambiguous (someone else's edit OR
+      // an RLS/permission drop), so we refetch and disambiguate below.
+      const seenByCandidate = new Map();   // id -> seenVersion (for empty responses)
       for (const { row, seenVersion } of updates) {
         const body = { ...row };
         delete body.id;            // can't change pk
-        const res = await rawPostgrest(
-          "PATCH",
-          `/rest/v1/tasks?id=eq.${encodeURIComponent(row.id)}&version=eq.${seenVersion}`,
-          body,
-          "return=representation",
-          `tasks.update:${row.id}@v${seenVersion}`
-        );
-        const after = await res.json().catch(() => []);
-        if (!after || !after.length) {
-          conflicts.push(row.id);
-          // Leave dirty so the next save retries against the new version.
-        } else {
-          serverRows.set(after[0].id, rowToServerSnapshot(after[0]));
-          markRecentWrite(after[0].id, after[0].version);
-          dirtyIds.delete(after[0].id);
+        try {
+          const res = await rawPostgrest(
+            "PATCH",
+            `/rest/v1/tasks?id=eq.${encodeURIComponent(row.id)}&version=eq.${seenVersion}`,
+            body,
+            "return=representation",
+            `tasks.update:${row.id}@v${seenVersion}`
+          );
+          const after = await res.json().catch(() => []);
+          if (!after || !after.length) {
+            seenByCandidate.set(row.id, seenVersion);
+            // Leave dirty so the next push retries against the new version.
+          } else {
+            acceptRow(after[0]);
+          }
+        } catch (e) {
+          errors.push({ id: row.id, error: e?.message || String(e) });
         }
       }
 
-      // Refetch conflicting rows so the next save attempt uses the new version.
-      // We do NOT clobber NODES — the user's local edits are preserved so they
-      // can retry; the next syncNodes will see the new server version and PATCH
-      // against it. (Last-write-wins per row, but at least the user is warned.)
-      if (conflicts.length) {
-        await refetchTasks(conflicts);
-        const list = conflicts.join(", ");
-        console.warn("[Supa] OCC conflict on:", list, "— remote was newer; refetched. Your local edits stay queued.");
-        flashBadge(`⚠ Conflict on ${conflicts.length} row(s) — see console`, false);
+      // Disambiguate empty-PATCH rows. Refetch refreshes serverRows; then:
+      //   server version advanced  → genuine conflict (someone else won)
+      //   server version unchanged → write dropped by RLS/permission (denied)
+      //   row gone                 → treat as conflict (deleted remotely)
+      const candidateIds = [...seenByCandidate.keys()];
+      if (candidateIds.length) {
+        await refetchTasks(candidateIds);
+        for (const id of candidateIds) {
+          const sv   = serverRows.get(id);
+          const seen = seenByCandidate.get(id);
+          if (!sv || (sv.version || 1) > seen) conflicts.push(id);
+          else denied.push(id);
+        }
+        if (conflicts.length) console.warn("[Supa] OCC conflict on:", conflicts.join(", "), "— remote was newer; refetched. Local edits stay queued.");
+        if (denied.length)    console.warn("[Supa] write denied on:", denied.join(", "), "— permission/RLS dropped it.");
       }
 
       // ─── Predecessor sync ───
@@ -1924,28 +1987,33 @@ Click ⓘ in the header for the full list of things I can do.</div>
           if (!hasAnyEdge) wipingTaskIds.delete(n.id);
         }
 
-        if (wipingTaskIds.size) {
-          const idList = [...wipingTaskIds].map(id => encodeURIComponent(id)).join(",");
-          console.log(`[Supa] preds.delete: wiping ${wipingTaskIds.size} task(s) before reinsert`);
-          await rawPostgrest(
-            "DELETE",
-            `/rest/v1/task_predecessors?task_id=in.(${idList})`,
-            null,
-            "return=minimal",
-            `preds.delete(${wipingTaskIds.size})`
-          );
-        }
-        if (edges.length) {
-          console.log(`[Supa] preds.insert: ${edges.length} edge(s) across ${new Set(edges.map(e => e.task_id)).size} task(s)`);
-          await rawPostgrest(
-            "POST",
-            "/rest/v1/task_predecessors",
-            edges,
-            "return=minimal",
-            `preds.insert(${edges.length})`
-          );
-        } else if (expectedNonEmpty.length) {
-          console.warn(`[Supa] preds.insert: 0 edges to insert despite ${expectedNonEmpty.length} task(s) with non-empty predecessors string — check parsePredecessor failures above`);
+        try {
+          if (wipingTaskIds.size) {
+            const idList = [...wipingTaskIds].map(id => encodeURIComponent(id)).join(",");
+            console.log(`[Supa] preds.delete: wiping ${wipingTaskIds.size} task(s) before reinsert`);
+            await rawPostgrest(
+              "DELETE",
+              `/rest/v1/task_predecessors?task_id=in.(${idList})`,
+              null,
+              "return=minimal",
+              `preds.delete(${wipingTaskIds.size})`
+            );
+          }
+          if (edges.length) {
+            console.log(`[Supa] preds.insert: ${edges.length} edge(s) across ${new Set(edges.map(e => e.task_id)).size} task(s)`);
+            await rawPostgrest(
+              "POST",
+              "/rest/v1/task_predecessors",
+              edges,
+              "return=minimal",
+              `preds.insert(${edges.length})`
+            );
+          } else if (expectedNonEmpty.length) {
+            console.warn(`[Supa] preds.insert: 0 edges to insert despite ${expectedNonEmpty.length} task(s) with non-empty predecessors string — check parsePredecessor failures above`);
+          }
+        } catch (e) {
+          console.warn("[Supa] preds sync failed:", e?.message || e);
+          for (const id of wipingTaskIds) errors.push({ id, error: "preds: " + (e?.message || e) });
         }
         // Update the per-task signature cache for everyone we synced. Tasks
         // we skipped wiping (parse-all-failed) keep their stale signature so
@@ -1960,27 +2028,22 @@ Click ⓘ in the header for the full list of things I can do.</div>
         // Preds saved — clear dirty for any task that's not still flagged by
         // a pending row-level OCC conflict.
         for (const n of predsChanged) {
-          if (!conflicts.includes(n.id)) dirtyIds.delete(n.id);
+          if (!conflicts.includes(n.id) && !denied.includes(n.id)) dirtyIds.delete(n.id);
         }
       }
 
-      if (!conflicts.length && (inserts.length || updates.length || predsChanged.length)) {
-        flashBadge("Synced ✓", true);
-      } else if (!inserts.length && !updates.length && !predsChanged.length) {
-        // Nothing to do — silent.
-      }
-
-      // Tell anyone listening (the AI panel today) which rows landed and
-      // which lost the optimistic-concurrency race. The AI uses this to warn
-      // about pending changes that didn't make it to the server.
+      // Tell anyone listening (the AI panel today) which rows landed and which
+      // didn't make it (conflict or denied), so it can warn about lost edits.
       try {
         if (typeof window.__onWriteResult === "function") {
           window.__onWriteResult({
-            writtenIds: [...inserts.map(r => r.id), ...updates.map(u => u.row.id)].filter(id => !conflicts.includes(id)),
-            conflictIds: conflicts.slice(),
+            writtenIds:  written.slice(),
+            conflictIds: [...conflicts, ...denied],
           });
         }
       } catch (e) { console.warn("[Supa] onWriteResult hook threw:", e); }
+
+      return { written, conflicts, denied, errors };
     }
 
     // Refetch one or more rows by id and overwrite their server snapshot.
@@ -1998,7 +2061,19 @@ Click ⓘ in the header for the full list of things I can do.</div>
       for (const r of rows) serverRows.set(r.id, rowToServerSnapshot(r));
     }
 
-    async function deleteRows(ids) {
+    // MANUAL SYNC MODE: deletions are NOT pushed immediately. The node is
+    // already gone from local NODES; the conflict-aware push reconciles it —
+    // any id in serverRows but no longer in NODES is deleted from the cloud at
+    // push time (see syncPush). This resolved no-op keeps the ~7 call sites
+    // (delete row, clear, rename cascade, import, AI) happy without each one
+    // racing a write to the cloud.
+    function deleteRows(ids) {
+      if (ids && ids.length) console.log("[Supa] delete deferred to next Sync → Upload:", ids);
+      return Promise.resolve();
+    }
+
+    // Real network delete — invoked only by syncPush during a manual upload.
+    async function deleteRowsNow(ids) {
       if (!currentUserId) {
         console.log("[Supa] delete skipped: not signed in");
         return;
@@ -2046,6 +2121,7 @@ Click ⓘ in the header for the full list of things I can do.</div>
         console.log("[Supa] cloud delete OK for", ids.length, "row(s)");
       } catch (e) {
         console.error("[Supa] cloud delete failed:", e?.message || e);
+        throw e;
       }
     }
 
@@ -2128,6 +2204,7 @@ Click ⓘ in the header for the full list of things I can do.</div>
         actual_end:   r.actual_end   || "",
         slack:        r.slack_days != null ? String(r.slack_days) : "",
         percent_done: Number(r.pct_done) || 0,
+        status:       r.status || "",
         est_cost:     r.est_cost     != null ? Number(r.est_cost)     : "",
         cost_to_date: r.cost_to_date != null ? Number(r.cost_to_date) : "",
         sale_price:   r.sale_price   != null ? Number(r.sale_price)   : "",
@@ -2224,6 +2301,25 @@ Click ⓘ in the header for the full list of things I can do.</div>
       }
     }
 
+    // Persistent "live sync offline" indicator. Realtime keeps each client's
+    // version cache fresh; if the channel drops, cross-user edits can silently
+    // pile up as conflicts, so a non-SUBSCRIBED state must be visible.
+    function showRealtimeStatus(status) {
+      const ok = status === "SUBSCRIBED";
+      let el = document.getElementById("rt-offline");
+      if (ok) { if (el) el.remove(); return; }
+      if (!el) {
+        el = document.createElement("div");
+        el.id = "rt-offline";
+        el.style.cssText =
+          "position:fixed;bottom:12px;left:12px;z-index:1000;background:#fef3c7;" +
+          "color:#92400e;border:1px solid #fde68a;border-radius:8px;padding:6px 10px;" +
+          "font:600 12px/1.3 system-ui,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,0.12);max-width:340px";
+        document.body.appendChild(el);
+      }
+      el.textContent = "⚠ Live sync offline — others' changes may not appear. Use 🔄 Sync → Replace local ← cloud to refresh.";
+    }
+
     function subscribeRealtime() {
       if (realtimeChannel) return;             // already subscribed
       realtimeChannel = supabase
@@ -2239,6 +2335,7 @@ Click ⓘ in the header for the full list of things I can do.</div>
             applyRemoteShareChange)
         .subscribe((status) => {
           console.log("[Supa rt] channel status:", status);
+          try { showRealtimeStatus(status); } catch (_) {}
         });
     }
 
@@ -2310,11 +2407,37 @@ Click ⓘ in the header for the full list of things I can do.</div>
       return forceSaveWith(nodes);
     }
     function forceSaveWith(nodes) {
-      console.log("[Supa] forceSave: firing upsertAll for", nodes.length, "nodes (raw fetch path)");
-      return upsertAll(structuredClone(nodes)).then(
-        () => console.log("[Supa] forceSave: SUCCESS"),
-        (e) => console.error("[Supa] forceSave: FAILED:", e?.message || e)
-      );
+      console.log("[Supa] push: firing upsertAll for", nodes.length, "nodes (raw fetch path)");
+      return upsertAll(structuredClone(nodes));   // resolves to { written, conflicts, denied, errors }
+    }
+
+    // Manual "Upload local → cloud" — conflict-aware. Pushes inserts/updates
+    // (skipping & reporting rows others changed), then reconciles deletions:
+    // any row we previously synced (in serverRows) that's no longer in local
+    // NODES is removed from the cloud. Returns a categorized result for the UI.
+    async function syncPush() {
+      const empty = { written: [], conflicts: [], denied: [], errors: [], deleted: [] };
+      if (!currentUserId)           return { ...empty, error: "not-signed-in" };
+      if (currentRole === "viewer") return { ...empty, error: "viewer" };
+      const nodes = Array.isArray(window.__NODES__) ? structuredClone(window.__NODES__) : [];
+
+      const res = await upsertAll(nodes);   // { written, conflicts, denied, errors }
+      let deleted = [];
+
+      // Deletion reconciliation: rows we know the server has (serverRows) that
+      // are gone locally. New rows other users added that we've never loaded
+      // aren't in serverRows, so we never touch them — safe.
+      const localIds = new Set(nodes.map(n => n.id));
+      const toDelete = [...serverRows.keys()].filter(id => !localIds.has(id));
+      if (toDelete.length) {
+        try {
+          await deleteRowsNow(toDelete);
+          deleted = toDelete;
+        } catch (e) {
+          for (const id of toDelete) res.errors.push({ id, error: "delete: " + (e?.message || e) });
+        }
+      }
+      return { ...res, deleted };
     }
 
     // ─── Sharing: project_shares helpers ───
@@ -2519,7 +2642,7 @@ Click ⓘ in the header for the full list of things I can do.</div>
     window.Supa = {
       signIn, verifyCode, cancelCode, signOut, loadBoard,
       cardSignIn, cardVerifyCode, cardCancelCode,
-      queueUpsertAll, deleteRows, forceSave, forceSaveWith,
+      queueUpsertAll, deleteRows, forceSave, forceSaveWith, syncPush,
       // sharing
       lookupUserByEmail, listShares, addShare, updateShare, removeShare,
       fetchProjectOwner, refreshEditableProjects, isInCloud,
@@ -3588,10 +3711,17 @@ Phase                                Dur (d)   Predecessor
      NOTE: legacy fields are NOT removed from existing saved boards on first load
      — the shim only ADDS the new keys. Old keys drop out as nodes are edited. */
   function migrateLegacyFields(nodes) {
+    // Which ids are someone's parent → used to detect leaves (no children).
+    const parentIds = new Set();
+    for (const n of nodes) {
+      const p = String(n.id || '').split('-').slice(0, -1).join('-');
+      if (p) parentIds.add(p);
+    }
     for (const n of nodes) {
       const parts = String(n.id || '').split('-');
       const isProject = parts.length === 1;
       const isSubtask = parts.length === 3;
+      const isLeaf    = !parentIds.has(n.id);
 
       if (isSubtask && (n.quoted_cost == null || n.quoted_cost === '')
                     && n.est_cost != null && n.est_cost !== '') {
@@ -3611,8 +3741,8 @@ Phase                                Dur (d)   Predecessor
       //   100  → 'Done'
       //   >0   → 'In Progress'
       //   0/empty → 'Not Started'
-      // Only applied to subtasks (status lives on leaves only; parents roll up).
-      if (isSubtask && (n.status == null || n.status === '')) {
+      // Applied to any leaf (no children); parents roll up from descendants.
+      if (isLeaf && (n.status == null || n.status === '')) {
         const pd = Number(n.percent_done);
         if (!isNaN(pd)) {
           if      (pd >= 100) n.status = 'Done';
@@ -4620,34 +4750,89 @@ Phase                                Dur (d)   Predecessor
   ══════════════════════════════════════════════════════════════ */
   // Manual "Save" — force-flushes pending edits to Supabase right now.
   // Auto-save still runs in the background; this just bypasses the debounce.
-  async function manualCloudSave() {
-    const btn = document.getElementById('saveBtn');
-    if (!window.Supa || !window.Supa.forceSave) {
+  // ── Sync dialog (replaces the old auto-push Save button) ──
+  // Manual sync only: edits are cached locally on every change, but the cloud
+  // is touched only when the user opens this dialog and picks a direction.
+  function openSyncDialog() {
+    if (!window.Supa || !window.Supa.currentUserId || !window.Supa.currentUserId()) {
       flashHint('Not signed in');
       return;
     }
-    btn.classList.add('is-syncing');
-    btn.classList.remove('is-dirty');
-    btn.textContent = '⟳ Saving…';
+    const r = document.getElementById('syncResult');
+    if (r) { r.style.display = 'none'; r.className = 'sync-result'; r.textContent = ''; }
+    document.getElementById('syncPushBtn').disabled = false;
+    document.getElementById('syncPullBtn').disabled = false;
+    document.getElementById('syncOverlay').style.display = 'flex';
+  }
+  function closeSyncDialog() {
+    const o = document.getElementById('syncOverlay');
+    if (o) o.style.display = 'none';
+  }
+  function showSyncResult(text, kind) {
+    const r = document.getElementById('syncResult');
+    if (!r) return;
+    r.className = 'sync-result' + (kind ? ' ' + kind : '');
+    r.textContent = text;
+    r.style.display = '';
+  }
+  function setSyncBusy(busy) {
+    const p = document.getElementById('syncPushBtn'), q = document.getElementById('syncPullBtn');
+    if (p) p.disabled = busy;
+    if (q) q.disabled = busy;
+  }
+
+  // ⬆ Upload local → cloud (conflict-aware).
+  async function doSyncPush() {
+    if (!window.Supa || !window.Supa.syncPush) { showSyncResult('Not signed in.', 'err'); return; }
+    setSyncBusy(true);
+    showSyncResult('Uploading…', null);
     try {
-      await window.Supa.forceSave();
-      btn.textContent = '✓ Saved';
-      btn.classList.remove('is-syncing', 'is-dirty');
-      setTimeout(() => { btn.textContent = '💾 Save'; }, 1200);
-    } catch (e) {
-      btn.textContent = '⚠ Failed';
-      btn.classList.remove('is-syncing');
-      btn.classList.add('is-dirty');
-      console.error('[Supa] manualCloudSave failed:', e);
-      setTimeout(() => { btn.textContent = '💾 Save'; }, 2000);
+      const res = await window.Supa.syncPush();
+      if (res.error === 'not-signed-in') { showSyncResult('Not signed in.', 'err'); return; }
+      if (res.error === 'viewer')        { showSyncResult('Your role is view-only — you can’t upload changes.', 'err'); return; }
+      const c = res.conflicts.length, d = res.denied.length, e = res.errors.length, del = res.deleted.length;
+      const lines = [`✓ ${res.written.length} row(s) uploaded` + (del ? `, ${del} deleted` : '') + '.'];
+      if (c) lines.push(`⚠ ${c} skipped — changed by someone else first. Use “Replace local ← cloud” to see their version, then redo yours: ${res.conflicts.join(', ')}`);
+      if (d) lines.push(`⛔ ${d} denied — you don’t have permission: ${res.denied.join(', ')}`);
+      if (e) lines.push(`✗ ${e} failed: ${res.errors.map(x => x.id).join(', ')}`);
+      showSyncResult(lines.join('\n'), (c || d || e) ? (e ? 'err' : 'warn') : 'ok');
+      if (!c && !d && !e) markSaved();   // clean only if everything landed
+    } catch (err) {
+      console.error('[Sync] push failed:', err);
+      showSyncResult('Upload failed: ' + (err?.message || err), 'err');
+    } finally {
+      setSyncBusy(false);
     }
   }
 
-  // Update Save button visual state based on whether there are unsaved edits.
-  // Wired off the dirtyBadge — when it says "Unsaved edits" we mark the
-  // button amber; when it says "Synced ✓" we clear it.
+  // ⬇ Replace local ← cloud (discards local, backs up first).
+  async function doSyncPull() {
+    if (!window.Supa || !window.Supa.loadBoard) { showSyncResult('Not signed in.', 'err'); return; }
+    if (!confirm('Replace your local board with the cloud version?\n\nLocal changes you haven’t uploaded will be lost. A backup of the current local board is saved to this browser first.')) return;
+    setSyncBusy(true);
+    showSyncResult('Loading from cloud…', null);
+    try {
+      try {
+        localStorage.setItem(LS_KEY + '_backup_' + Date.now(), JSON.stringify({ NODES, SOURCE, MAX_SLACK_CAP }));
+      } catch (e) { console.warn('[Sync] local backup failed', e); }
+      await window.Supa.loadBoard();   // replaces NODES from the cloud (replaceNodes)
+      saveLocal();                     // persist the pulled board to localStorage
+      populateFilters(); render();
+      showSyncResult(`✓ Loaded ${NODES.length} row(s) from the cloud.`, 'ok');
+      markSaved();
+    } catch (err) {
+      console.error('[Sync] pull failed:', err);
+      showSyncResult('Load failed: ' + (err?.message || err), 'err');
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+
+  // Update the Sync button's visual state from the dirtyBadge — when it says
+  // "Unsaved edits" we mark the button amber (local edits not yet uploaded);
+  // when it says "Synced ✓" we clear it.
   function refreshSaveBtnFromBadge() {
-    const btn = document.getElementById('saveBtn');
+    const btn = document.getElementById('syncBtn');
     const badge = document.getElementById('dirtyBadge');
     if (!btn) return;
     if (!badge || badge.style.display === 'none') {
@@ -5566,7 +5751,7 @@ Phase                                Dur (d)   Predecessor
       if (!window.Supa.isInCloud(projectId)) {
         setShareStatus(
           `Project ${projectId} hasn't been saved to the cloud yet. ` +
-          `Hit 💾 Save in the toolbar, then try sharing again.`,
+          `Hit 🔄 Sync → Upload in the toolbar, then try sharing again.`,
           'err'
         );
         return;
@@ -5582,7 +5767,7 @@ Phase                                Dur (d)   Predecessor
     } catch (e) {
       const msg = e?.message || String(e);
       const friendly = msg.includes('project_shares_project_id_fkey')
-        ? `Project ${projectId} isn't in the cloud. Save it first (💾 Save) and try again.`
+        ? `Project ${projectId} isn't in the cloud. Upload it first (🔄 Sync → Upload) and try again.`
         : msg.includes('project_shares_shared_with_fkey')
         ? `That user no longer exists in auth.`
         : `Share failed: ${msg}`;
@@ -5984,10 +6169,10 @@ Phase                                Dur (d)   Predecessor
       slack:        document.getElementById('m-slack').value,
       // Status is the user-facing field — pct_done is derived for back-compat (Done=100, others=0).
       // Subtask (leaf): writes status from the dropdown. Parent rows persist neither.
-      status:       (rowType === 'subtask' && !isParent)
+      status:       (!isParent)
                       ? (document.getElementById('m-status').value || 'Not Started')
                       : '',
-      percent_done: (rowType === 'subtask' && !isParent)
+      percent_done: (!isParent)
                       ? (document.getElementById('m-status').value === 'Done' ? 100 : 0)
                       : '',
       // Project meta — only persisted on project rows.
